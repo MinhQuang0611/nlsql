@@ -1,0 +1,7 @@
+.env
+.env.example
+docker_logs.txt
+docker_logs2.txt
+docker_logs3.txt
+*logs.txt
+QLDT_FINAL.xlsx

@@ -1,0 +1,96 @@
+
+from __future__ import annotations
+
+import logging
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from config import get_settings
+from db.connection import check_db_connection, close_db, init_db
+from api.routers.chat import router as chat_router
+
+settings = get_settings()
+
+logging.basicConfig(
+    level=getattr(logging, settings.log_level.upper(), logging.INFO),
+    format="%(asctime)s | %(levelname)-8s | %(name)s — %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    logger.info("Starting nlsql [env=%s]", settings.app_env)
+
+    db_status = await check_db_connection()
+    if db_status["status"] != "ok":
+        logger.critical("DB not reachable on startup: %s", db_status["detail"])
+        raise RuntimeError(f"Cannot connect to database: {db_status['detail']}")
+
+    logger.info("DB OK — %s", db_status["version"])
+
+    if settings.app_env == "development":
+        await init_db()
+
+    logger.info("nlsql ready ")
+    yield
+
+    logger.info("Shutting down nlsql…")
+    await close_db()
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title="nlsql",
+        version="0.1.0",
+        docs_url="/docs" if settings.app_env != "production" else None,
+        redoc_url="/redoc" if settings.app_env != "production" else None,
+        lifespan=lifespan,
+    )
+
+    origins = (
+        ["*"]
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    from api.routers.tables import router as tables_router
+    from api.routers.chart import router as chart_router
+    app.include_router(chat_router, prefix="/api/v1")
+    app.include_router(tables_router, prefix="/api/v1")
+    app.include_router(chart_router, prefix="/api/v1")
+
+
+
+    @app.get("/", tags=["Root"], include_in_schema=False)
+    async def root() -> dict:
+        return {"service": "nlsql", "version": "0.1.0", "status": "ok"}
+
+    @app.get("/health", tags=["Health"])
+    async def health() -> JSONResponse:
+        db = await check_db_connection()
+        healthy = db["status"] == "ok"
+        payload = {
+            "status": "healthy" if healthy else "degraded",
+            "db": db,
+            "env": settings.app_env,
+        }
+        return JSONResponse(
+            content=payload,
+            status_code=200 if healthy else 503,
+        )
+
+    return app
+
+
+app = create_app()

@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     log_level: str = "INFO"
 
-    qdrant_url: str = "http://localhost:6333"
+    qdrant_url: str = "http://localhost:63332"
     qdrant_api_key: str | None = None
     
     redis_url: str = "redis://localhost:6379"

@@ -11,7 +11,7 @@ services:
     volumes:
       - .:/app
     ports:
-      - "8386:8386"
+      - "8388:8388"
     command: ["/app/entrypoint.sh"]
     depends_on:
       - qdrant
@@ -21,7 +21,7 @@ services:
     image: qdrant/qdrant:latest
     container_name: nlsql_qdrant
     ports:
-      - "6333:6333"
+      - "63332:63332"
     volumes:
       - qdrant_data:/qdrant/storage
 

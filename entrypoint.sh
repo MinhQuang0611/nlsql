@@ -9,7 +9,7 @@ done
 echo "✅ Database is ready!"
 
 if [ "$APP_ENV" = "development" ]; then
-  uvicorn main:app --host 0.0.0.0 --port 8386 --reload
+  uvicorn main:app --host 0.0.0.0 --port 8388 --reload
 else
-  uvicorn main:app --host 0.0.0.0 --port 8386 --workers 2
+  uvicorn main:app --host 0.0.0.0 --port 8388 --workers 2
 fi

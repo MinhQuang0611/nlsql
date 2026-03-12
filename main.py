@@ -12,6 +12,9 @@ from fastapi.responses import JSONResponse
 from config import get_settings
 from db.connection import check_db_connection, close_db, init_db
 from api.routers.chat import router as chat_router
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, JSONResponse
+import os
 
 settings = get_settings()
 
@@ -69,6 +72,16 @@ def create_app() -> FastAPI:
     app.include_router(chat_router, prefix="/api/v1")
     app.include_router(tables_router, prefix="/api/v1")
     app.include_router(chart_router, prefix="/api/v1")
+
+    # Static files
+    static_dir = os.path.join(os.path.dirname(__file__), "static")
+    if not os.path.exists(static_dir):
+        os.makedirs(static_dir)
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+    @app.get("/chat", include_in_schema=False)
+    async def chat_page():
+        return FileResponse(os.path.join(static_dir, "chat.html"))
 
 
 

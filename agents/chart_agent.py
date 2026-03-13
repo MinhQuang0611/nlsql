@@ -10,6 +10,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from config import get_settings
 from graph.state import AgentState, ChartConfig
 from prompts.chart import CHART_SYSTEM, CHART_HUMAN, CHART_HUMAN_FORCED
+from utils.data_profiler import profile_columns, format_profile_for_prompt
+from utils.chart_adjustment import adjust_chart_data
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -76,17 +78,16 @@ async def run_chart_agent(
     user_query: str,
     query_result: list[dict[str, Any]],
     forced_chart_type: Optional[str] = None,
-) -> tuple[ChartConfig, list[dict[str, Any]]]:
+) -> tuple[ChartConfig, list[dict[str, Any]], list[dict[str, Any]]]:
     """
-    Hàm độc lập để chạy Chart Agent mà không cần qua LangGraph.
-    
+
     Args:
         user_query: Câu hỏi của người dùng
         query_result: Data thô từ database
         forced_chart_type: Nếu có, ép agent dùng loại chart này
-    
+
     Returns:
-        (chart_config, chart_data)
+        (chart_config, chart_data, column_profiles)
     """
     if not query_result:
         logger.warning("[ChartAgent] empty query_result — defaulting to table")
@@ -95,24 +96,29 @@ async def run_chart_agent(
             x_axis=None, y_axis=None, group_by=None,
             title=user_query[:60], x_label=None, y_label=None,
         )
-        return chart_config, []
+        return chart_config, [], []
 
-    # Validate forced_chart_type
     if forced_chart_type and forced_chart_type not in VALID_CHART_TYPES:
         logger.warning("[ChartAgent] invalid forced_chart_type=%s, ignoring", forced_chart_type)
         forced_chart_type = None
 
+    profiles = profile_columns(query_result)
+    column_profile_text = format_profile_for_prompt(profiles)
+
     columns = list(query_result[0].keys())
     sample_rows = query_result[:3]
 
-    logger.info("[ChartAgent] columns=%s, rows=%d, forced_chart_type=%s",
-                columns, len(query_result), forced_chart_type)
+    logger.info(
+        "[ChartAgent] columns=%s, rows=%d, forced_chart_type=%s",
+        columns, len(query_result), forced_chart_type,
+    )
+    logger.info("[ChartAgent] column_profiles:\n%s", column_profile_text)
 
-    # Chọn human prompt phù hợp
     if forced_chart_type:
         human_content = CHART_HUMAN_FORCED.format(
             user_query=user_query,
             columns=columns,
+            column_profile=column_profile_text,
             sample_rows=sample_rows,
             forced_chart_type=forced_chart_type,
         )
@@ -120,6 +126,7 @@ async def run_chart_agent(
         human_content = CHART_HUMAN.format(
             user_query=user_query,
             columns=columns,
+            column_profile=column_profile_text,
             sample_rows=sample_rows,
         )
 
@@ -132,8 +139,6 @@ async def run_chart_agent(
     raw = response.content.strip()
 
     chart_config = _parse_llm_response(raw, user_query)
-
-    # Nếu có forced_chart_type mà LLM trả về khác → override cứng
     if forced_chart_type and chart_config["chart_type"] != forced_chart_type:
         logger.warning(
             "[ChartAgent] LLM returned chart_type=%s but forced=%s, overriding",
@@ -142,30 +147,32 @@ async def run_chart_agent(
         chart_config["chart_type"] = forced_chart_type  # type: ignore[literal-required]
 
     chart_data = _reshape_for_chart(query_result, chart_config)
+
+    chart_data, adjusted_config = adjust_chart_data(
+        chart_data=chart_data,
+        chart_config=dict(chart_config),
+        profiles=[dict(p) for p in profiles],
+    )
+    chart_config["x_label"] = adjusted_config.get("x_label")  # type: ignore[literal-required]
+    chart_config["y_label"] = adjusted_config.get("y_label")  # type: ignore[literal-required]
+
     logger.info("[ChartAgent] chart_type=%s", chart_config["chart_type"])
 
-    return chart_config, chart_data
+    profiles_as_dicts = [dict(p) for p in profiles]
+    return chart_config, chart_data, profiles_as_dicts
 
 
 async def chart_agent(state: AgentState) -> AgentState:
     """LangGraph node: chạy chart agent trong graph pipeline."""
 
-    intent = state.get("intent")
     forced_chart_type = state.get("forced_chart_type")
-    force_chart = state.get("force_chart", False)
-
-    # Bỏ qua nếu intent không phải chart_request VÀ không có yêu cầu bắt buộc sinh chart
-    should_run = (intent == "chart_request") or bool(forced_chart_type) or force_chart
-    if not should_run:
-        return {**state, "chart_config": None, "chart_data": None}
-
     query_result = state.get("query_result", [])
     user_query = state["user_query"]
 
-    chart_config, chart_data = await run_chart_agent(
+    chart_config, chart_data, column_profiles = await run_chart_agent(
         user_query=user_query,
         query_result=query_result,
         forced_chart_type=forced_chart_type,
     )
 
-    return {**state, "chart_config": chart_config, "chart_data": chart_data}
+    return {**state, "chart_config": chart_config, "chart_data": chart_data, "column_profiles": column_profiles}

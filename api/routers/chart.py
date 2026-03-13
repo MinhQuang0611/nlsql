@@ -30,7 +30,6 @@ _graph_app = build_graph()
     ),
 )
 async def generate_chart(request: ChartRequest) -> ChartResponse:
-    # Validate chart_type nếu có
     if request.chart_type and request.chart_type not in VALID_CHART_TYPES:
         raise HTTPException(
             status_code=422,
@@ -46,7 +45,7 @@ async def generate_chart(request: ChartRequest) -> ChartResponse:
     )
 
     try:
-        chart_config, chart_data = await run_chart_agent(
+        chart_config, chart_data, column_profiles = await run_chart_agent(
             user_query=request.user_query,
             query_result=request.data,
             forced_chart_type=request.chart_type,
@@ -59,6 +58,7 @@ async def generate_chart(request: ChartRequest) -> ChartResponse:
         chart_type=chart_config["chart_type"],
         chart_config=dict(chart_config),
         chart_data=chart_data,
+        column_profiles=column_profiles,
     )
 
 
@@ -119,6 +119,7 @@ async def chat_to_chart(request: ChatToChartRequest) -> ChatToChartResponse:
             chart_config=dict(chart_config) if chart_config else None,
             chart_data=final_state.get("chart_data"),
             chart_type=chart_type_out,
+            column_profiles=final_state.get("column_profiles", []),
             execution_time_ms=final_state.get("execution_time_ms", 0.0),
             intent=final_state.get("intent", "unknown"),
             error=final_state.get("executor_error"),

@@ -24,6 +24,10 @@ class ChartResponse(BaseModel):
     chart_type: str = Field(..., description="Loại biểu đồ được chọn")
     chart_config: dict[str, Any] = Field(..., description="Full cấu hình biểu đồ (title, x_axis, y_axis, group_by, ...)")
     chart_data: list[dict[str, Any]] = Field(..., description="Data đã được reshape phù hợp với chart type")
+    column_profiles: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Phân tích kiểu dữ liệu từng cột (dimension/measure) — dùng để debug hoặc hiển thị UI",
+    )
 
 
 class ChatToChartRequest(BaseModel):
@@ -47,6 +51,10 @@ class ChatToChartResponse(BaseModel):
     chart_config: Optional[dict[str, Any]] = Field(None, description="Cấu hình biểu đồ")
     chart_data: Optional[list[dict[str, Any]]] = Field(None, description="Data đã reshape cho chart")
     chart_type: Optional[str] = Field(None, description="Loại biểu đồ được chọn cuối cùng")
+    column_profiles: Optional[list[dict[str, Any]]] = Field(
+        default_factory=list,
+        description="Phân tích kiểu dữ liệu từng cột (dimension/measure)",
+    )
     execution_time_ms: float = Field(0.0, description="Thời gian thực thi SQL (ms)")
     intent: str = Field(..., description="Intent được phát hiện")
     error: Optional[str] = Field(None, description="Thông báo lỗi nếu có")

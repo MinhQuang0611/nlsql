@@ -70,6 +70,7 @@ class AgentState(TypedDict, total=False):
 
     forced_chart_type: Optional[str]        # Hint từ API: ép buộc chart type nếu có
     force_chart: bool                        # Nếu True, luôn sinh chart dù intent không phải chart_request
+    column_profiles: Optional[list[dict]]    # Output của data_profiler — phân tích kiểu cột
     chart_config: Optional[ChartConfig] 
     chart_data: Optional[list[dict]]    
 

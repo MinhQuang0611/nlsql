@@ -67,6 +67,9 @@ Chú ý:
 CHART_HUMAN = """Câu hỏi của người dùng: {user_query}
 
 Các cột có trong kết quả dữ liệu: {columns}
+Phân tích kiểu dữ liệu từng cột:
+{column_profile}
+
 Dữ liệu mẫu (tối đa 3 dòng):
 {sample_rows}
 
@@ -75,6 +78,9 @@ Dựa vào thông tin trên, vui lòng đưa ra cấu hình biểu đồ phù h�
 CHART_HUMAN_FORCED = """Câu hỏi của người dùng: {user_query}
 
 Các cột có trong kết quả dữ liệu: {columns}
+Phân tích kiểu dữ liệu từng cột:
+{column_profile}
+
 Dữ liệu mẫu (tối đa 3 dòng):
 {sample_rows}
 

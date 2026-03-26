@@ -21,7 +21,7 @@ services:
     image: qdrant/qdrant:latest
     container_name: nlsql_qdrant
     ports:
-      - "63332:63332"
+      - "63332:6333"
     volumes:
       - qdrant_data:/qdrant/storage
 

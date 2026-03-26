@@ -27,3 +27,4 @@ class ChatResponse(BaseModel):
     intent: str = Field(..., description="Ý định đo được")
     error: Optional[str] = Field(None, description="Thông báo lỗi (nếu có)")
     recommend_questions: list[str] = Field(default_factory=list, description="Các câu hỏi gợi ý tiếp theo")
+    clarification_question: Optional[str] = Field(None, description="Câu hỏi làm rõ (chỉ có khi intent = ambiguous) — client nên hiển thị câu này cho người dùng trả lời")

@@ -46,3 +46,5 @@ Dockerfile*
 README.md
 *.md
 Makefile
+
+text2sql_chatbot/

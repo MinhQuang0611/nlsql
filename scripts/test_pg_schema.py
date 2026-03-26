@@ -17,7 +17,7 @@ async def main():
             print(f"  Columns: {[c['name'] for c in schema['columns']]}")
             print(f"  Sample rows: {len(schema['sample_rows'])}")
     except Exception as e:
-        print(f"Error checking ClickHouse schema: {e}")
+        print(f"Error checking PostgreSQL schema: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())

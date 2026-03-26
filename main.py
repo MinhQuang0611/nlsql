@@ -1,6 +1,7 @@
 
 from __future__ import annotations
 
+import os
 import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
@@ -14,7 +15,9 @@ from db.connection import check_db_connection, close_db, init_db
 from api.routers.chat import router as chat_router
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
-import os
+from scripts.index_schema import main as index_schema_main
+
+
 
 settings = get_settings()
 
@@ -39,6 +42,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     if settings.app_env == "development":
         await init_db()
+
+    logger.info("Checking/indexing schema...")
+    await index_schema_main()
 
     logger.info("nlsql ready ")
     yield
@@ -104,6 +110,8 @@ def create_app() -> FastAPI:
         )
 
     return app
+
+
 
 
 app = create_app()

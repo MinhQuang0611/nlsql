@@ -20,20 +20,6 @@ from config import get_settings
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-try:
-    from clickhouse_sqlalchemy.drivers.asynch.connector import AsyncAdapt_asynch_cursor
-    async def _async_soft_close(self):
-        pass
-    AsyncAdapt_asynch_cursor._async_soft_close = _async_soft_close
-
-    from asynch.connection import Connection
-    async def do_nothing(*args, **kwargs):
-        pass
-    Connection.commit = do_nothing
-    Connection.rollback = do_nothing
-except ImportError:
-    pass
-
 def _build_engine() -> AsyncEngine:
     return create_async_engine(
         settings.database_url,

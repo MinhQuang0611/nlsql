@@ -33,9 +33,9 @@ class ChartConfig(TypedDict):
     y_label: Optional[str]
 
 
-class SQLCheckResult(TypedDict):
+class SQLCorrectionResult(TypedDict):
     is_valid: bool
-    issues: list[str]           
+    issues: list[str]
     fixed_sql: Optional[str]    
 
 
@@ -51,16 +51,20 @@ class AgentState(TypedDict, total=False):
         "schema_question",
         "greeting",
         "out_of_scope",      
+        "ambiguous",         
     ]
     intent_reasoning: str            
 
     relevant_tables: list[str]      
     schema_context: list[TableSchema]  
+    pruned_schema_context: list[TableSchema] 
+    
+    query_plan: str
 
     generated_sql: str              
     sql_reasoning: str               
 
-    sql_check: SQLCheckResult       
+    sql_correction: SQLCorrectionResult       
     final_sql: str                  
 
     query_result: list[dict[str, Any]]  
@@ -68,11 +72,16 @@ class AgentState(TypedDict, total=False):
     execution_time_ms: float
     executor_error: Optional[str]    
 
+    data_check_is_valid: bool
+    data_check_issues: list[str]
+
     forced_chart_type: Optional[str]        # Hint từ API: ép buộc chart type nếu có
     force_chart: bool                        # Nếu True, luôn sinh chart dù intent không phải chart_request
     column_profiles: Optional[list[dict]]    # Output của data_profiler — phân tích kiểu cột
     chart_config: Optional[ChartConfig] 
     chart_data: Optional[list[dict]]    
+
+    clarification_question: Optional[str]  # Câu hỏi làm rõ khi intent là ambiguous
 
     answer: str                      
     answer_format: Literal["text", "table", "chart+text"]

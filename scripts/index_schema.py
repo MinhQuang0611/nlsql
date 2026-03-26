@@ -64,12 +64,8 @@ async def main():
             vectors_config=VectorParams(size=1536, distance=Distance.COSINE),
         )
     else:
-        logger.info(f"Collection {COLLECTION_NAME} already exists. Recreating it.")
-        qdrant.delete_collection(COLLECTION_NAME)
-        qdrant.create_collection(
-            collection_name=COLLECTION_NAME,
-            vectors_config=VectorParams(size=1536, distance=Distance.COSINE),
-        )
+        logger.info(f"Collection {COLLECTION_NAME} already exists. Skipping indexing.")
+        return
 
     all_tables = await _fetch_all_tables()
     logger.info(f"Found {len(all_tables)} tables in database.")
@@ -85,7 +81,6 @@ async def main():
         excel_table_desc = table_meta.get("table_desc", "")
         col_meta_dict = table_meta.get("columns", {})
         
-        # ---- Build natural-language embed text (Vietnamese-friendly) ----
         col_vi_parts = []
         enum_hints = []
 
@@ -100,11 +95,9 @@ async def main():
                 c["excel_vi_name"] = vi_name
                 c["excel_note"] = note
 
-            # Display label: prefer Vietnamese name, fallback to technical name
             label = f"{vi_name} ({c_name})" if vi_name else c_name
             col_vi_parts.append(label)
 
-            # If note contains enum-like values (contains '/'), add a hint line
             raw_note = note or db_comment
             if raw_note and "/" in raw_note:
                 enum_hints.append(f"  - {label} có thể nhận giá trị: {raw_note}")
@@ -146,7 +139,8 @@ async def main():
         
         payload = {
             "table_name": table_name,
-            "schema_json": json.dumps(schema, default=str)
+            # "schema_json": json.dumps(schema, default=str),
+            "embed_text": embed_text
         }
         
         points.append(

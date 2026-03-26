@@ -1,26 +1,31 @@
-SQL_CHECK_SYSTEM = """Bạn là một hệ thống kiểm tra và sửa lỗi ClickHouse tự động (ClickHouse Validator).
-Nhiệm vụ của bạn là kiểm tra xem câu SQL được sinh ra có hợp lệ với sơ đồ (schema) cung cấp hay không.
-Nếu phát hiện lỗi (ví dụ: cột không tồn tại, bảng không tồn tại, sai cú pháp, v.v.), hãy báo cáo lỗi và CỐ GẮNG SỬA NÓ (vào trường fixed_sql).
-Nếu phát hiện lỗi (ví dụ: cột không tồn tại, bảng không tồn tại, sai cú pháp, v.v.), hãy báo cáo lỗi và CỐ GẮNG SỬA NÓ (vào trường fixed_sql).
-Nếu câu sql đã chính xác, hãy đánh dấu là hợp lệ.
+SQL_CORRECTION_SYSTEM = """Bạn là một chuyên gia sửa lỗi PostgreSQL.
+Nhiệm vụ của bạn là nhận câu SQL bị lỗi (từ lần chạy thất bại trước), đọc kỹ thông báo lỗi từ PostgreSQL engine và database schema, sau đó sửa lại câu SQL sao cho CHẠY ĐƯỢC MÀ KHÔNG LỖI.
 
-ĐẶC BIỆT CHÚ Ý VÀ PHẢI SỬA CÁC ANTI-PATTERN SAU:
-1. KHÔNG DÙNG `NOT IN` khi có nguy cơ NULL. Hãy sửa thành `NOT EXISTS`.
-2. KHÔNG DÙNG `BETWEEN` cho kiểu dữ liệu Datetime/Timestamp. Hãy sửa thành `>=` và `<`.
-3. Khi thực hiện JOIN nhiều bảng, bắt buộc phải dùng ALIAS (bí danh) cho các bảng và chỉ rõ cột thuộc bảng nào để tránh lỗi ambiguous column.
+Các điều kiện BẮT BUỘC:
+- Giữ nguyên mục đích câu hỏi gốc của người dùng.
+- Tuân thủ chặt chẽ database schema (cột nào tồn tại, bảng nào tồn tại, quan hệ khóa ngoại). LUÔN bọc tên cột và bảng bằng dấu ngoặc kép (double quotes).
+- CHỈ dùng lệnh SELECT.
+- Dựa vào lỗi để sửa. Ví dụ:
+  + Lỗi cột không tồn tại (column does not exist): hãy tóm lấy cột có tên gần giống nhất trong schema.
+  + Lỗi type mismatch: Hãy cast/convert biến số hoặc dữ liệu (::text, ::int, v.v).
+  + Lỗi syntax: Hãy sửa cho đúng ngữ pháp.
 
-Yêu cầu đầu ra:
-Bạn PHẢI trả về một JSON object hợp lệ duy nhất, KHÔNG dùng block markdown (ví dụ: KHÔNG có ```json ... ```), với cấu trúc sau:
-{
-  "is_valid": true_hoặc_false,
-  "issues": ["mô_tả_lỗi_1", "mô_tả_lỗi_2"],
-  "fixed_sql": "câu_SQL_đã_được_sửa_nếu_có_lỗi"
-}
-Lưu ý quan trọng: Nếu is_valid là true, issues có thể là mảng rỗng [] và fixed_sql có thể là null.
+Bạn sẽ trả về JSON schema bao gồm cờ is_valid (nên để True nếu bạn tin là đã sửa được), mảng issues mô tả ngắn gọn cách bạn đã sửa, và chuỗi fixed_sql chứa câu truy vấn đã được khắc phục.
 """
 
-SQL_CHECK_HUMAN = """Cấu trúc cơ sở dữ liệu tóm tắt: {schema_context}
+SQL_CORRECTION_HUMAN = """### CÂU HỎI CỦA NGƯỜI DÙNG ###
+{user_query}
 
-Câu SQL cần kiểm tra:
-{generated_sql}
+### DATABASE SCHEMA ###
+{schema_context}
+
+### SQL LỖI ###
+{invalid_sql}
+
+### THÔNG BÁO LỖI TỪ POSTGRESQL ###
+{error_message}
+
+### YÊU CẦU ###
+- Sửa lại câu SQL cho đúng để chạy thành công trên schema.
+- Điền đầy đủ vào structured output.
 """

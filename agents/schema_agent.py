@@ -43,33 +43,49 @@ def _get_embeddings() -> OpenAIEmbeddings:
 
 
 _GET_TABLES_SQL = text("""
-    SELECT name AS table_name
-    FROM system.tables
-    WHERE database = currentDatabase()
-      AND (engine NOT IN ('View', 'MaterializedView', 'System') OR engine IS NULL)
-    ORDER BY name
+    SELECT table_name
+    FROM information_schema.tables
+    WHERE table_schema = 'public'
+      AND table_type = 'BASE TABLE'
+    ORDER BY table_name
 """)
 
 _GET_TABLE_DESC_SQL = text("""
-    SELECT comment AS description
-    FROM system.tables
-    WHERE database = currentDatabase() AND name = :table_name
+    SELECT obj_description(pg_class.oid, 'pg_class') AS description
+    FROM pg_class
+    JOIN pg_namespace ON pg_namespace.oid = pg_class.relnamespace
+    WHERE pg_namespace.nspname = 'public' AND pg_class.relname = :table_name
 """)
 
 _GET_FOREIGN_KEYS_SQL = text("""
-    SELECT '' AS column_name, '' AS foreign_table, '' AS foreign_column WHERE 1 = 0
+    SELECT
+        kcu.column_name,
+        ccu.table_name AS foreign_table,
+        ccu.column_name AS foreign_column
+    FROM information_schema.table_constraints AS tc
+    JOIN information_schema.key_column_usage AS kcu
+      ON tc.constraint_name = kcu.constraint_name
+      AND tc.table_schema = kcu.table_schema
+    JOIN information_schema.constraint_column_usage AS ccu
+      ON ccu.constraint_name = tc.constraint_name
+      AND ccu.table_schema = tc.table_schema
+    WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_name = :table_name
 """)
 
 _GET_COLUMNS_SQL = text("""
     SELECT
-        name AS column_name,
-        type AS data_type,
-        if(type LIKE 'Nullable(%)', 'YES', 'NO') AS is_nullable,
-        comment AS comment
-    FROM system.columns
-    WHERE database = currentDatabase()
-      AND table = :table_name
-    ORDER BY position
+        c.column_name,
+        c.data_type,
+        c.is_nullable,
+        pgd.description as comment
+    FROM information_schema.columns c
+    JOIN pg_class t ON c.table_name = t.relname
+    JOIN pg_namespace ns ON ns.oid = t.relnamespace AND ns.nspname = c.table_schema
+    JOIN pg_attribute a ON a.attrelid = t.oid AND a.attname = c.column_name AND a.attnum > 0
+    LEFT JOIN pg_description pgd ON pgd.objoid = t.oid AND pgd.objsubid = a.attnum
+    WHERE c.table_schema = 'public'
+      AND c.table_name = :table_name
+    ORDER BY c.ordinal_position
 """)
 
 _GET_SAMPLE_SQL = 'SELECT * FROM "{table}" LIMIT 3'

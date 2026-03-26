@@ -1,10 +1,7 @@
-
 from __future__ import annotations
 
-import json
 import logging
-import asyncio
-from collections import Counter
+from pydantic import BaseModel, Field
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -23,11 +20,10 @@ _llm = ChatOpenAI(
     api_key=settings.openai_api_key,
 )
 
-_llm_creative = ChatOpenAI(
-    model=settings.openai_model,
-    temperature=0.7,
-    api_key=settings.openai_api_key,
-)
+class SQLGenerationSchema(BaseModel):
+    sql: str = Field(description="Câu lệnh PostgreSQL query thuần túy")
+    reasoning: str = Field(description="Giải thích ngắn gọn lý do sinh ra câu lệnh SQL này")
+
 
 def _format_schema_context(schemas: list[TableSchema]) -> str:
     """Render schema_context list into a readable string for the prompt."""
@@ -74,106 +70,86 @@ def _format_schema_context(schemas: list[TableSchema]) -> str:
 
 async def sql_gen_agent(state: AgentState) -> AgentState:
     """
-    LangGraph node: generate SQL from natural language.
-
-    Reads  : state["user_query"], state["schema_context"],
-             state["retry_count"], state["sql_check"] (on retry)
-    Writes : state["generated_sql"], state["sql_reasoning"]
+    LangGraph node: generate SQL from natural language using the reasoning plan.
+    Reads  : user_query, schema_context, query_plan
+    Writes : generated_sql, sql_reasoning, (clears sql_correction logic)
     """
-    user_query = state["user_query"]
+    user_query = state.get("user_query", "")
     schema_context = state.get("schema_context", [])
+    query_plan = state.get("query_plan", "")
     retry_count = state.get("retry_count", 0)
+    
     schema_str = _format_schema_context(schema_context)
 
     retry_hint = ""
     if retry_count > 0:
-        prev_check = state.get("sql_check", {})
+        prev_check = state.get("sql_correction", {})
         issues = prev_check.get("issues", [])
-        prev_sql = state.get("generated_sql", "")
         retry_hint = SQL_GEN_RETRY_HINT.format(
-            issues="\n".join(f"  - {i}" for i in issues),
-            previous_sql=prev_sql,
+            issues="\n".join(f"  - {i}" for i in issues)
         )
 
     logger.info("[SQLGenAgent] attempt=%d query=%r", retry_count + 1, user_query)
 
     # 1. Fetch Few-Shot Examples from Qdrant
     few_shot_str = "Không tìm thấy ví dụ (No few shot available)."
-    try:
-        qdrant = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
-        embeddings = OpenAIEmbeddings(
-            model=settings.embedding_model, 
-            api_key=settings.openai_api_key
-        )
-        
-        vector = embeddings.embed_query(user_query)
-        response = qdrant.query_points(
-            collection_name="few_shot_collection",
-            query=vector,
-            limit=3
-        )
-        search_result = response.points
-        if search_result:
-            lines = []
-            for hit in search_result:
-                if hit.payload:
-                    lines.append(f"Q: {hit.payload['question']}\nSQL: {hit.payload['sql']}")
-            if lines:
-                few_shot_str = "\n\n".join(lines)
-            logger.info(f"[SQLGenAgent] Retrieved {len(lines)} few-shot examples.")
-    except Exception as exc:
-        logger.warning(f"[SQLGenAgent] Qdrant few-shot retrieval failed: {exc}")
+    if settings.qdrant_url and settings.qdrant_api_key:
+        try:
+            qdrant = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
+            embeddings = OpenAIEmbeddings(
+                model=settings.embedding_model, 
+                api_key=settings.openai_api_key
+            )
+            
+            vector = embeddings.embed_query(user_query)
+            response = qdrant.query_points(
+                collection_name="few_shot_collection",
+                query=vector,
+                limit=3
+            )
+            search_result = response.points
+            if search_result:
+                lines = []
+                for hit in search_result:
+                    if hit.payload:
+                        lines.append(f"Q: {hit.payload['question']}\nSQL: {hit.payload['sql']}")
+                if lines:
+                    few_shot_str = "\n\n".join(lines)
+                logger.info(f"[SQLGenAgent] Retrieved {len(lines)} few-shot examples.")
+        except Exception as exc:
+            logger.warning(f"[SQLGenAgent] Qdrant few-shot retrieval failed or skipped: {exc}")
 
     messages = [
         SystemMessage(content=SQL_GEN_SYSTEM),
         HumanMessage(content=SQL_GEN_HUMAN.format(
             user_query=user_query,
+            query_plan=query_plan,
             schema_context=schema_str,
             few_shot_examples=few_shot_str,
             retry_hint=retry_hint,
         )),
     ]
 
-    # 2. Self-Consistency Voting (generate 3 outputs)
-    NUM_SAMPLES = 3
-    # Use creative LLM with higher temperature to ge variations
-    logger.info("[SQLGenAgent] Initiating self-consistency parallel generation...")
-    tasks = [_llm_creative.ainvoke(messages) for _ in range(NUM_SAMPLES)]
-    responses = await asyncio.gather(*tasks, return_exceptions=True)
-
-    candidates = []
+    llm_structured = _llm.with_structured_output(SQLGenerationSchema)
     
-    for resp in responses:
-        if isinstance(resp, Exception):
-            logger.error(f"[SQLGenAgent] Candidate generation failed: {resp}")
-            continue
-            
-        raw = resp.content.strip()
-        try:
-            parsed = json.loads(raw)
-            sql = parsed.get("sql", "").strip()
-            reasoning = parsed.get("reasoning", "")
-            if sql:
-                candidates.append({"sql": sql, "reasoning": reasoning})
-        except (json.JSONDecodeError, KeyError) as exc:
-            logger.error("[SQLGenAgent] Candidate parse error: %s | raw=%r", exc, raw)
+    generated_sql = ""
+    sql_reasoning = ""
 
-    if not candidates:
-        generated_sql = "SELECT 1; -- Fallback: all generation tasks failed"
-        sql_reasoning = "All generations failed to parse JSON."
-    else:
-        # Find the most frequent SQL (ignoring minor whitespace differences)
-        normalized_sqls = [c["sql"].replace('\n', ' ').strip().lower() for c in candidates]
-        counter = Counter(normalized_sqls)
-        best_normalized_sql, count = counter.most_common(1)[0]
-        
-        logger.info(f"[SQLGenAgent] Self-consistency picked SQL with {count}/{len(candidates)} votes.")
-        
-        # Recover the original formatting of the chosen normalized SQL
-        best_candidate = next(c for c in candidates if c["sql"].replace('\n', ' ').strip().lower() == best_normalized_sql)
-        
-        generated_sql = best_candidate["sql"]
-        sql_reasoning = best_candidate["reasoning"]
+    try:
+        response = await llm_structured.ainvoke(messages)
+        generated_sql = response.sql.strip()
+        sql_reasoning = response.reasoning
+    except Exception as exc:
+        logger.error("[SQLGenAgent] SQL generation failed: %s", exc, exc_info=True)
 
     logger.info("[SQLGenAgent] generated_sql=\n%s", generated_sql)
-    return {**state, "generated_sql": generated_sql, "sql_reasoning": sql_reasoning}
+    
+    # Return fresh state for correction logic down the line
+    return {
+        **state, 
+        "generated_sql": generated_sql, 
+        "sql_reasoning": sql_reasoning,
+        # Clear out any past corrections as this is a fresh generation
+        "sql_correction": {"is_valid": False, "issues": [], "fixed_sql": None},
+        "final_sql": ""
+    }

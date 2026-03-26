@@ -4,10 +4,8 @@ pydantic>=2.7.0
 pydantic-settings>=2.2.0
 sqlalchemy>=2.0.30
 
-asynch==0.2.2
-clickhouse-sqlalchemy
-
-clickhouse-connect>=0.8.0
+asyncpg
+psycopg2-binary
 
 alembic>=1.13.1
 langchain>=0.2.0
@@ -26,3 +24,4 @@ pandas>=2.1.0
 pytest>=8.2.0
 pytest-asyncio>=0.23.6
 httpx>=0.27.0
+openpyxl

@@ -3,6 +3,9 @@ from fastapi import APIRouter, HTTPException
 from api.schemas.chat import ChatRequest, ChatWithTableRequest, ChatResponse
 from graph.builder import build_graph
 from utils.recommend import generate_recommend_questions
+from utils.google_sheets import append_to_sheet
+from config import get_settings
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +46,7 @@ async def _process_chat(initial_state: dict) -> ChatResponse:
             except Exception as rec_err:
                 logger.warning("[Chat] Không thể sinh recommend questions: %s", rec_err)
 
-        return ChatResponse(
+        response = ChatResponse(
             answer=final_state.get("answer", "Hệ thống gặp lỗi, không thể trả lời."),
             answer_format=final_state.get("answer_format", "text"),
             sql=final_state.get("final_sql"),
@@ -54,6 +57,22 @@ async def _process_chat(initial_state: dict) -> ChatResponse:
             error=final_state.get("executor_error"),
             recommend_questions=recommend_questions,
         )
+
+        # Ghi log ra Google Sheet (chạy nền)
+        settings = get_settings()
+        if settings.google_sheet_url:
+            row_data = [
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                initial_state.get("session_id", ""),
+                initial_state.get("user_query", ""),
+                str(response.answer),
+                str(response.sql) if response.sql else "",
+                str(response.error) if response.error else ""
+            ]
+            import asyncio
+            asyncio.create_task(append_to_sheet(settings.google_sheet_url, row_data))
+
+        return response
 
     except Exception as e:
         logger.error("Error during graph execution: %s", e, exc_info=True)

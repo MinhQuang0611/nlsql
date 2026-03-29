@@ -9,7 +9,7 @@ from langchain_openai import OpenAIEmbeddings
 import pandas as pd
 
 from config import get_settings
-from db.connection import get_db_context
+# from db.connection import get_db_context
 from agents.schema_agent import _fetch_all_tables, _fetch_table_schema
 
 logging.basicConfig(level=logging.INFO)

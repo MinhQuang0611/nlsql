@@ -10,11 +10,39 @@ class Settings(BaseSettings):
     )
 
 
-    db_host: str = "localhost"
-    db_port: int = 5432
-    db_name: str = "nlsql"
-    db_user: str = "postgres"
-    db_password: str = ""
+    active_db: str = "postgres"
+
+    pg_db_host: str = "localhost"
+    pg_db_port: int = 5432
+    pg_db_name: str = "nlsql"
+    pg_db_user: str = "postgres"
+    pg_db_password: str = ""
+
+    ch_db_host: str = "localhost"
+    ch_db_port: int = 8123
+    ch_db_name: str = "nlsql"
+    ch_db_user: str = "default"
+    ch_db_password: str = ""
+
+    @property
+    def db_host(self) -> str:
+        return self.pg_db_host if self.active_db == "postgres" else self.ch_db_host
+
+    @property
+    def db_port(self) -> int:
+        return self.pg_db_port if self.active_db == "postgres" else self.ch_db_port
+
+    @property
+    def db_name(self) -> str:
+        return self.pg_db_name if self.active_db == "postgres" else self.ch_db_name
+
+    @property
+    def db_user(self) -> str:
+        return self.pg_db_user if self.active_db == "postgres" else self.ch_db_user
+
+    @property
+    def db_password(self) -> str:
+        return self.pg_db_password if self.active_db == "postgres" else self.ch_db_password
     db_pool_size: int = 5
     db_max_overflow: int = 10
     db_pool_timeout: int = 30
@@ -47,25 +75,41 @@ class Settings(BaseSettings):
     
     redis_url: str = "redis://localhost:6379"
 
+    google_sheet_url: str = ""
+
 
     # Config cho DataBase Postgres
      
     @property
     def database_url(self) -> str:
         from urllib.parse import quote_plus
-        return (
-            f"postgresql+asyncpg://{self.db_user}:{quote_plus(self.db_password)}"
-            f"@{self.db_host}:{self.db_port}/{self.db_name}"
-            f"?ssl=disable"
-        )
+        if self.active_db == "clickhouse":
+            native_port = 19000 if self.db_port == 18123 else self.db_port
+            return (
+                f"clickhouse+asynch://{self.db_user}:{quote_plus(self.db_password)}"
+                f"@{self.db_host}:{native_port}/{self.db_name}"
+            )
+        else:
+            return (
+                f"postgresql+asyncpg://{self.db_user}:{quote_plus(self.db_password)}"
+                f"@{self.db_host}:{self.db_port}/{self.db_name}"
+                f"?ssl=disable"
+            )
+
     @property
     def database_url_sync(self) -> str:
         from urllib.parse import quote_plus
-        return (
-            f"postgresql+psycopg2://{self.db_user}:{quote_plus(self.db_password)}"
-            f"@{self.db_host}:{self.db_port}/{self.db_name}"
-            f"?sslmode=disable"
-        )
+        if self.active_db == "clickhouse":
+            return (
+                f"clickhouse+http://{self.db_user}:{quote_plus(self.db_password)}"
+                f"@{self.db_host}:8123/{self.db_name}"
+            )
+        else:
+            return (
+                f"postgresql+psycopg2://{self.db_user}:{quote_plus(self.db_password)}"
+                f"@{self.db_host}:{self.db_port}/{self.db_name}"
+                f"?sslmode=disable"
+            )
 
 @lru_cache
 def get_settings() -> Settings:

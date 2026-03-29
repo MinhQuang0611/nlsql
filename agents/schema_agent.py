@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import json
@@ -7,12 +6,12 @@ from functools import lru_cache
 from typing import Any
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage
 from sqlalchemy import text
 from qdrant_client import QdrantClient
 
 from config import get_settings
-from db.connection import get_db_context
+from db.connection import get_db_context, ch_execute
 from graph.state import AgentState, TableColumn, TableSchema
 from prompts.schema_prune import SCHEMA_SYSTEM, SCHEMA_HUMAN
 
@@ -28,21 +27,22 @@ _llm = ChatOpenAI(
 
 @lru_cache(maxsize=1)
 def _get_qdrant_client() -> QdrantClient:
-    """Singleton QdrantClient — created once, reused across all requests."""
     return QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
 
 
 @lru_cache(maxsize=1)
 def _get_embeddings() -> OpenAIEmbeddings:
-    """Singleton OpenAIEmbeddings — created once, reused across all requests."""
     return OpenAIEmbeddings(
         model=settings.embedding_model,
         api_key=settings.openai_api_key,
     )
 
 
+# ---------------------------------------------------------------------------
+# SQL queries — Postgres
+# ---------------------------------------------------------------------------
 
-_GET_TABLES_SQL = text("""
+_PG_GET_TABLES = text("""
     SELECT table_name
     FROM information_schema.tables
     WHERE table_schema = 'public'
@@ -50,29 +50,27 @@ _GET_TABLES_SQL = text("""
     ORDER BY table_name
 """)
 
-_GET_TABLE_DESC_SQL = text("""
+_PG_GET_TABLE_DESC = text("""
     SELECT obj_description(pg_class.oid, 'pg_class') AS description
     FROM pg_class
     JOIN pg_namespace ON pg_namespace.oid = pg_class.relnamespace
     WHERE pg_namespace.nspname = 'public' AND pg_class.relname = :table_name
 """)
 
-_GET_FOREIGN_KEYS_SQL = text("""
+_PG_GET_FOREIGN_KEYS = text("""
     SELECT
         kcu.column_name,
         ccu.table_name AS foreign_table,
         ccu.column_name AS foreign_column
     FROM information_schema.table_constraints AS tc
     JOIN information_schema.key_column_usage AS kcu
-      ON tc.constraint_name = kcu.constraint_name
-      AND tc.table_schema = kcu.table_schema
+      ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
     JOIN information_schema.constraint_column_usage AS ccu
-      ON ccu.constraint_name = tc.constraint_name
-      AND ccu.table_schema = tc.table_schema
+      ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
     WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_name = :table_name
 """)
 
-_GET_COLUMNS_SQL = text("""
+_PG_GET_COLUMNS = text("""
     SELECT
         c.column_name,
         c.data_type,
@@ -88,48 +86,61 @@ _GET_COLUMNS_SQL = text("""
     ORDER BY c.ordinal_position
 """)
 
-_GET_SAMPLE_SQL = 'SELECT * FROM "{table}" LIMIT 3'
+
+# ---------------------------------------------------------------------------
+# SQL queries — ClickHouse
+# ---------------------------------------------------------------------------
+
+_CH_GET_TABLES = "SHOW TABLES"
+
+_CH_GET_COLUMNS = """
+    SELECT
+        name        AS column_name,
+        type        AS data_type,
+        comment     AS comment
+    FROM system.columns
+    WHERE database = '{db}' AND table = '{table}'
+    ORDER BY position
+"""
+
+_CH_GET_SAMPLE = "SELECT * FROM `{table}` LIMIT 3"
+_PG_GET_SAMPLE = 'SELECT * FROM "{table}" LIMIT 3'
 
 
-async def _fetch_all_tables() -> list[str]:
+# ---------------------------------------------------------------------------
+# Fetch helpers — Postgres
+# ---------------------------------------------------------------------------
+
+async def _pg_fetch_all_tables() -> list[str]:
     async with get_db_context() as db:
-        result = await db.execute(_GET_TABLES_SQL)
+        result = await db.execute(_PG_GET_TABLES)
         return [row[0] for row in result.fetchall()]
 
 
-async def _fetch_table_schema(table_name: str) -> TableSchema:
+async def _pg_fetch_table_schema(table_name: str) -> TableSchema:
     async with get_db_context() as db:
-        desc_result = await db.execute(_GET_TABLE_DESC_SQL, {"table_name": table_name})
-        desc_row = desc_result.fetchone()
+        desc_row = (await db.execute(_PG_GET_TABLE_DESC, {"table_name": table_name})).fetchone()
         description = desc_row[0] if desc_row and desc_row[0] else None
 
-        fk_result = await db.execute(_GET_FOREIGN_KEYS_SQL, {"table_name": table_name})
+        fk_rows = (await db.execute(_PG_GET_FOREIGN_KEYS, {"table_name": table_name})).fetchall()
         foreign_keys = [
-            {
-                "column_name": row.column_name,
-                "foreign_table": row.foreign_table,
-                "foreign_column": row.foreign_column,
-            }
-            for row in fk_result.fetchall()
+            {"column_name": r.column_name, "foreign_table": r.foreign_table, "foreign_column": r.foreign_column}
+            for r in fk_rows
         ]
 
-        col_result = await db.execute(_GET_COLUMNS_SQL, {"table_name": table_name})
+        col_rows = (await db.execute(_PG_GET_COLUMNS, {"table_name": table_name})).fetchall()
         columns: list[TableColumn] = [
             TableColumn(
-                name=row.column_name,
-                type=row.data_type,
-                nullable=row.is_nullable == "YES",
-                comment=row.comment,
+                name=r.column_name,
+                type=r.data_type,
+                nullable=r.is_nullable == "YES",
+                comment=r.comment,
             )
-            for row in col_result.fetchall()
+            for r in col_rows
         ]
 
-        sample_result = await db.execute(
-            text(_GET_SAMPLE_SQL.format(table=table_name))
-        )
-        sample_rows: list[dict[str, Any]] = [
-            dict(row._mapping) for row in sample_result.fetchall()
-        ]
+        sample_rows_raw = (await db.execute(text(_PG_GET_SAMPLE.format(table=table_name)))).fetchall()
+        sample_rows = [dict(r._mapping) for r in sample_rows_raw]
 
     return TableSchema(
         table_name=table_name,
@@ -140,43 +151,85 @@ async def _fetch_table_schema(table_name: str) -> TableSchema:
     )
 
 
-def _format_table_list(schemas: list[TableSchema]) -> str:
-    lines = []
-    for s in schemas:
-        cols = ", ".join(f"{c['name']} ({c['type']})" for c in s["columns"])
-        lines.append(f"- {s['table_name']}: {cols}")
-    return "\n".join(lines)
+# ---------------------------------------------------------------------------
+# Fetch helpers — ClickHouse
+# ---------------------------------------------------------------------------
+
+async def _ch_fetch_all_tables() -> list[str]:
+    rows = await ch_execute(_CH_GET_TABLES)
+    return [row[0] for row in rows]
 
 
+async def _ch_fetch_table_schema(table_name: str) -> TableSchema:
+    col_sql = _CH_GET_COLUMNS.format(db=settings.ch_db_name, table=table_name)
+    col_rows = await ch_execute(col_sql)
+
+    columns: list[TableColumn] = [
+        TableColumn(
+            name=row[0],
+            type=row[1],
+            nullable=False,   # ClickHouse dùng Nullable(T) trong type string
+            comment=row[2] if len(row) > 2 else None,
+        )
+        for row in col_rows
+    ]
+
+    sample_sql = _CH_GET_SAMPLE.format(table=table_name)
+    sample_raw = await ch_execute(sample_sql)
+    if sample_raw and hasattr(sample_raw[0], "_mapping"):
+        sample_rows = [dict(r._mapping) for r in sample_raw]
+    elif sample_raw and hasattr(sample_raw[0], "_fields"):
+        sample_rows = [r._asdict() for r in sample_raw]
+    else:
+        col_names = [c["name"] for c in columns]
+        sample_rows = [dict(zip(col_names, row)) for row in sample_raw]
+
+    return TableSchema(
+        table_name=table_name,
+        description=None,       # ClickHouse không có table-level description
+        columns=columns,
+        foreign_keys=[],        # ClickHouse không có FK
+        sample_rows=sample_rows,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Unified helpers (route theo active_db)
+# ---------------------------------------------------------------------------
+
+async def _fetch_all_tables() -> list[str]:
+    if settings.active_db == "clickhouse":
+        return await _ch_fetch_all_tables()
+    return await _pg_fetch_all_tables()
+
+
+async def _fetch_table_schema(table_name: str) -> TableSchema:
+    if settings.active_db == "clickhouse":
+        return await _ch_fetch_table_schema(table_name)
+    return await _pg_fetch_table_schema(table_name)
+
+
+# ---------------------------------------------------------------------------
+# schema_agent node
+# ---------------------------------------------------------------------------
 
 async def schema_agent(state: AgentState) -> AgentState:
-    """
-    LangGraph node: select relevant tables and build schema context.
-    Uses Qdrant semantic search with score threshold, dedup, and LLM fallback.
-
-    Reads  : state["user_query"]
-    Writes : state["relevant_tables"], state["schema_context"]
-    """
     user_query = state["user_query"]
     selected_tables = state.get("selected_tables")
 
     if selected_tables:
-        logger.info(f"[SchemaAgent] Giới hạn truy vấn trong các bảng được chọn: {selected_tables}")
+        logger.info("[SchemaAgent] Giới hạn truy vấn trong các bảng được chọn: %s", selected_tables)
         try:
-            schema_context = []
-            for table in selected_tables:
-                schema = await _fetch_table_schema(table)
-                schema_context.append(schema)
+            schema_context = [await _fetch_table_schema(t) for t in selected_tables]
             return {**state, "relevant_tables": selected_tables, "schema_context": schema_context}
         except Exception as exc:
-            logger.error(f"[SchemaAgent] Lỗi khi lấy schema cho selected_tables: {exc}")
+            logger.error("[SchemaAgent] Lỗi khi lấy schema cho selected_tables: %s", exc)
             return {**state, "relevant_tables": [], "schema_context": []}
 
     SCORE_THRESHOLD = 0.68
     SEARCH_LIMIT = 20
 
-    logger.info(f"[SchemaAgent] Qdrant semantic search for: {user_query!r}")
-
+    logger.info("[SchemaAgent] Qdrant semantic search for: %r", user_query)
     relevant_tables: list[str] = []
     schema_context: list = []
 
@@ -193,8 +246,8 @@ async def schema_agent(state: AgentState) -> AgentState:
         )
         search_result = response.points
 
-        # --- Dedup: keep highest-score hit per table_name ---
-        best: dict[str, Any] = {}  # table_name -> hit
+        # Dedup: keep highest-score hit per table_name
+        best: dict[str, Any] = {}
         for hit in search_result:
             if not hit.payload:
                 continue
@@ -203,26 +256,28 @@ async def schema_agent(state: AgentState) -> AgentState:
             if tname not in best or score > best[tname].score:
                 best[tname] = hit
 
-        # --- Score threshold filter + logging ---
-        passed = [(tname, hit) for tname, hit in best.items() if hit.score >= SCORE_THRESHOLD]
+        passed = [(t, h) for t, h in best.items() if h.score >= SCORE_THRESHOLD]
         passed.sort(key=lambda x: x[1].score, reverse=True)
 
         if passed:
             score_log = ", ".join(f"{t}={h.score:.3f}" for t, h in passed)
-            logger.info(f"[SchemaAgent] Tables passed threshold ({SCORE_THRESHOLD}): {score_log}")
+            logger.info("[SchemaAgent] Tables passed threshold (%.2f): %s", SCORE_THRESHOLD, score_log)
         else:
-            all_scores = ", ".join(f"{t}={h.score:.3f}" for t, h in sorted(best.items(), key=lambda x: x[1].score, reverse=True))
-            logger.warning(f"[SchemaAgent] No table >= {SCORE_THRESHOLD}. All scores: {all_scores}")
+            all_scores = ", ".join(
+                f"{t}={h.score:.3f}"
+                for t, h in sorted(best.items(), key=lambda x: x[1].score, reverse=True)
+            )
+            logger.warning("[SchemaAgent] No table >= %.2f. All scores: %s", SCORE_THRESHOLD, all_scores)
 
         for tname, hit in passed:
             relevant_tables.append(tname)
             schema_context.append(json.loads(hit.payload["schema_json"]))
 
-        # --- LLM fallback when fewer than 2 tables found ---
+        # LLM fallback khi tìm được < 2 bảng
         if len(relevant_tables) < 2:
             logger.warning(
-                f"[SchemaAgent] Only {len(relevant_tables)} table(s) found via vector search. "
-                "Falling back to LLM for table selection."
+                "[SchemaAgent] Only %d table(s) found via vector search. Falling back to LLM.",
+                len(relevant_tables),
             )
             try:
                 all_table_names = await _fetch_all_tables()
@@ -239,23 +294,21 @@ async def schema_agent(state: AgentState) -> AgentState:
                     for line in llm_response.content.strip().splitlines()
                     if line.strip()
                 ]
-                # Only add tables that actually exist and aren't already included
                 existing = set(relevant_tables)
                 valid_all = set(all_table_names)
                 new_tables = [t for t in llm_tables if t in valid_all and t not in existing]
-                logger.info(f"[SchemaAgent] LLM fallback suggested: {llm_tables} → valid new: {new_tables}")
+                logger.info("[SchemaAgent] LLM fallback suggested: %s → valid new: %s", llm_tables, new_tables)
 
                 for tname in new_tables:
                     schema = await _fetch_table_schema(tname)
                     relevant_tables.append(tname)
                     schema_context.append(schema)
+
             except Exception as fallback_exc:
-                logger.error(f"[SchemaAgent] LLM fallback failed: {fallback_exc}")
+                logger.error("[SchemaAgent] LLM fallback failed: %s", fallback_exc)
 
     except Exception as exc:
-        logger.error(f"[SchemaAgent] Qdrant search failed: {exc}. Ensure Qdrant is running and populated.")
-        relevant_tables = []
-        schema_context = []
+        logger.error("[SchemaAgent] Qdrant search failed: %s. Ensure Qdrant is running and populated.", exc)
 
-    logger.info(f"[SchemaAgent] Final relevant_tables = {relevant_tables}")
-    return {**state, "relevant_tables": relevant_tables, "schema_context": schema_context}
+    logger.info("[SchemaAgent] Final relevant_tables = %s", relevant_tables)
+    return {**state, "relevant_tables": relevant_tables, "schema_context": schema_context}

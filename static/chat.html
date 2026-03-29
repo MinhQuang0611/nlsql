@@ -8,8 +8,26 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/vega@6"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vega-lite@6"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vega-embed@7"></script>
     <style>
         :root {
+            --primary-bg: #f1f5f9;
+            --secondary-bg: #ffffff;
+            --accent-color: #0ea5e9;
+            --accent-glow: rgba(14, 165, 233, 0.2);
+            --text-primary: #1e293b;
+            --text-secondary: #64748b;
+            --glass-bg: rgba(255, 255, 255, 0.8);
+            --glass-border: rgba(0, 0, 0, 0.1);
+            --user-msg-bg: #e2e8f0;
+            --ai-msg-bg: #ffffff;
+            --sidebar-width: 300px;
+            --transition-speed: 0.3s;
+        }
+
+        body.dark-mode {
             --primary-bg: #0f172a;
             --secondary-bg: #1e293b;
             --accent-color: #38bdf8;
@@ -20,7 +38,6 @@
             --glass-border: rgba(255, 255, 255, 0.1);
             --user-msg-bg: #334155;
             --ai-msg-bg: #1e293b;
-            --sidebar-width: 300px;
         }
 
         * {
@@ -36,6 +53,7 @@
             height: 100vh;
             display: flex;
             overflow: hidden;
+            transition: background-color var(--transition-speed), color var(--transition-speed);
         }
 
         /* Sidebar Styles */
@@ -58,6 +76,7 @@
             align-items: center;
             gap: 0.5rem;
             color: var(--accent-color);
+            transition: color var(--transition-speed);
         }
 
         .table-list-container {
@@ -80,10 +99,11 @@
             border: 1px solid var(--glass-border);
             border-radius: 0.5rem;
             padding: 0.75rem 1rem;
-            color: white;
+            color: var(--text-primary);
             width: 100%;
             margin-bottom: 1.5rem;
             outline: none;
+            transition: all var(--transition-speed);
         }
 
         .search-box:focus {
@@ -137,7 +157,8 @@
             display: flex;
             flex-direction: column;
             position: relative;
-            background: radial-gradient(circle at top right, #1e293b, #0f172a);
+            background: radial-gradient(circle at top right, var(--secondary-bg), var(--primary-bg));
+            transition: background var(--transition-speed);
         }
 
         #chat-container {
@@ -151,37 +172,46 @@
         }
 
         .message {
-            max-width: 85%;
-            padding: 1rem 1.5rem;
-            border-radius: 1rem;
-            line-height: 1.6;
-            position: relative;
+            display: flex;
+            flex-direction: column;
+            width: 100%;
             animation: fadeIn 0.3s ease-out;
         }
 
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(10px);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
         .message.user {
-            align-self: flex-end;
-            background: var(--user-msg-bg);
-            border-bottom-right-radius: 0.25rem;
+            align-items: flex-end;
         }
 
         .message.ai {
-            align-self: flex-start;
-            background: var(--ai-msg-bg);
+            align-items: flex-start;
+        }
+
+        .message-bubble {
+            max-width: 85%;
+            padding: 1rem 1.25rem;
+            border-radius: 1.25rem;
+            position: relative;
+            line-height: 1.6;
+            word-wrap: break-word;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .message.user .message-bubble {
+            background: var(--user-msg-bg);
+            border-bottom-right-radius: 0.25rem;
+            color: var(--text-primary);
+        }
+
+        .message.ai .message-bubble {
+            background-color: var(--ai-msg-bg);
+            color: var(--text-primary);
             border-bottom-left-radius: 0.25rem;
             border: 1px solid var(--glass-border);
+            width: fit-content;
+            min-width: 300px;
+            max-width: 95%;
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
         }
 
@@ -208,11 +238,11 @@
             width: 100%;
             border-collapse: collapse;
             font-size: 0.85rem;
-            background: #0f172a;
+            background: var(--ai-msg-bg);
         }
 
         th {
-            background: #1e293b;
+            background: var(--secondary-bg);
             text-align: left;
             padding: 0.75rem;
             color: var(--text-secondary);
@@ -250,10 +280,10 @@
             border: 1px solid var(--glass-border);
             border-radius: 1rem;
             padding: 1rem 1.5rem;
-            color: white;
+            color: var(--text-primary);
             outline: none;
             font-size: 1rem;
-            transition: border-color 0.2s;
+            transition: all var(--transition-speed);
         }
 
         #user-input:focus {
@@ -327,6 +357,85 @@
             margin-top: 0.5rem;
             text-align: right;
         }
+
+        .chart-container {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 0.75rem;
+            border: 1px solid var(--glass-border);
+            min-height: 320px;
+            width: 100%;
+            max-width: 100%;
+            overflow: hidden;
+            box-sizing: border-box;
+            display: flex;
+            justify-content: center;
+        }
+
+        .chart-container svg, .chart-container canvas {
+            max-width: 100% !important;
+            height: auto !important;
+        }
+
+        .recommendations {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 1rem;
+            animation: fadeIn 0.5s ease-out;
+        }
+
+        .recommend-btn {
+            background: rgba(56, 189, 248, 0.1);
+            border: 1px solid var(--accent-color);
+            color: var(--accent-color);
+            padding: 0.5rem 1rem;
+            border-radius: 2rem;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .recommend-btn:hover {
+            background: var(--accent-color);
+            color: var(--primary-bg);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px var(--accent-glow);
+        }
+
+        .chart-switcher {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+            padding: 0.5rem;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 0.5rem;
+            border: 1px dashed var(--glass-border);
+        }
+
+        .chart-type-btn {
+            background: var(--secondary-bg);
+            border: 1px solid var(--glass-border);
+            color: var(--text-secondary);
+            padding: 0.25rem 0.75rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .chart-type-btn:hover {
+            border-color: var(--accent-color);
+            color: var(--accent-color);
+        }
+
+        .chart-type-btn.active {
+            background: var(--accent-color);
+            color: var(--primary-bg);
+            border-color: var(--accent-color);
+        }
     </style>
 </head>
 
@@ -344,6 +453,15 @@
             <!-- Tables will be loaded here -->
             <div style="padding: 1rem; color: var(--text-secondary); text-align: center;">Loading tables...</div>
         </div>
+
+        <div class="sidebar-footer"
+            style="margin-top: auto; padding-top: 1rem; border-top: 1px solid var(--glass-border); display: flex; align-items: center; justify-content: space-between;">
+            <div id="theme-toggle"
+                style="cursor: pointer; display: flex; align-items: center; gap: 0.5rem; color: var(--text-secondary); font-size: 0.9rem; font-weight: 500;">
+                <span id="theme-icon">🌙</span>
+                <span id="theme-text">Dark Mode</span>
+            </div>
+        </div>
     </aside>
 
     <main>
@@ -352,6 +470,9 @@
                 Xin chào! Tôi là trợ lý dữ liệu thông minh. Tôi có thể giúp bạn truy vấn dữ liệu từ database bằng ngôn
                 ngữ tự nhiên.<br><br>
                 Bạn có thể chọn các bảng cụ thể ở thanh bên trái hoặc đặt câu hỏi trực tiếp cho tôi.
+            </div>
+            <div id="initial-suggestions" class="recommendations" style="margin-top: 0; padding-left: 1rem;">
+                <!-- Starter questions will be loaded here -->
             </div>
         </div>
 
@@ -374,6 +495,10 @@
 
         let allTables = {};
         let selectedTables = new Set();
+        let chatHistory = [];
+
+        // Add initial system message to history if needed, 
+        // but typically history is for user-assistant pairs.
 
         // Fetch tables on load
         async function fetchTables() {
@@ -428,11 +553,187 @@
 
         tableSearch.oninput = (e) => renderTableList(e.target.value);
 
+        // Theme Toggle Logic
+        const themeToggle = document.getElementById('theme-toggle');
+        const themeIcon = document.getElementById('theme-icon');
+        const themeText = document.getElementById('theme-text');
+
+        function updateThemeUI() {
+            const isDark = document.body.classList.contains('dark-mode');
+            themeIcon.innerText = isDark ? '🌙' : '☀️';
+            themeText.innerText = isDark ? 'Dark Mode' : 'Light Mode';
+
+            // Re-render charts to match theme
+        }
+
+        themeToggle.onclick = () => {
+            document.body.classList.toggle('dark-mode');
+            const isDark = document.body.classList.contains('dark-mode');
+            localStorage.setItem('theme', isDark ? 'dark' : 'light');
+            updateThemeUI();
+        };
+
+        // Load saved theme
+        if (localStorage.getItem('theme') === 'dark' || !localStorage.getItem('theme')) {
+            if (localStorage.getItem('theme') === 'dark') {
+                document.body.classList.add('dark-mode');
+            }
+            updateThemeUI();
+        } else {
+            updateThemeUI();
+        }
+
+        const starterQuestions = [
+            "Tổng số lượng sinh viên hiện tại?",
+            "Thống kê sinh viên theo từng ngành học",
+            "Danh sách sinh viên đang học",
+            "Top 5 ngành học có đông sinh viên nhất"
+        ];
+
+        function renderInitialSuggestions() {
+            const container = document.getElementById('initial-suggestions');
+            container.innerHTML = '';
+            starterQuestions.forEach(q => {
+                const btn = document.createElement('button');
+                btn.className = 'recommend-btn';
+                btn.innerText = q;
+                btn.onclick = () => sendMessage(q);
+                container.appendChild(btn);
+            });
+        }
+
+        function renderChart(containerId, config, data) {
+            if (!config || !data || data.length === 0) return;
+
+            const isDark = document.body.classList.contains('dark-mode');
+            const textColor = isDark ? '#f8fafc' : '#1e293b';
+            const gridColor = isDark ? 'rgba(148, 163, 184, 0.1)' : 'rgba(0, 0, 0, 0.05)';
+            const secondaryTextColor = isDark ? '#94a3b8' : '#64748b';
+
+            const chartType = config.chart_type || config.type || 'bar';
+            let mark = 'bar';
+
+            if (chartType === 'line') mark = 'line';
+            else if (chartType === 'scatter') mark = 'point';
+            else if (chartType === 'pie') mark = 'arc';
+            else if (chartType === 'area') mark = 'area';
+
+            // Special handling for table/number in vega-lite container
+            if (chartType === 'table' || chartType === 'number') {
+                document.getElementById(containerId).innerHTML = `<div style="padding: 1rem; color: var(--text-secondary); text-align: center; font-style: italic;">Viewing as ${chartType}... (See data above)</div>`;
+                return;
+            }
+
+            const spec = {
+                "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+                "description": config.title || "Data Chart",
+                "width": "container",
+                "height": 300,
+                "autosize": { "type": "fit", "contains": "padding" },
+                "data": { "values": data },
+                "title": {
+                    "text": config.title,
+                    "color": textColor,
+                    "fontSize": 14,
+                    "anchor": "start"
+                },
+                "config": {
+                    "background": "transparent",
+                    "view": { "stroke": "transparent" },
+                    "axis": {
+                        "domainColor": secondaryTextColor,
+                        "gridColor": gridColor,
+                        "labelColor": secondaryTextColor,
+                        "tickColor": secondaryTextColor,
+                        "titleColor": secondaryTextColor
+                    },
+                    "legend": {
+                        "labelColor": secondaryTextColor,
+                        "titleColor": secondaryTextColor
+                    }
+                }
+            };
+
+            if (chartType === 'pie') {
+                spec.mark = { "type": "arc", "tooltip": true };
+                // Determine fields: prefer 'y'/'x' (reshaped) otherwise use config axes
+                const thetaField = (data[0] && 'y' in data[0]) ? 'y' : config.y_axis;
+                const colorField = (data[0] && 'x' in data[0]) ? 'x' : config.x_axis;
+                spec.encoding = {
+                    "theta": { "field": thetaField, "type": "quantitative" },
+                    "color": { "field": colorField, "type": "nominal", "title": config.x_label || config.x_axis }
+                };
+            } else {
+                spec.mark = { "type": mark, "tooltip": true };
+                const xField = (data[0] && 'x' in data[0]) ? 'x' : config.x_axis;
+                const yField = (data[0] && 'y' in data[0]) ? 'y' : config.y_axis;
+                const groupField = (data[0] && 'group' in data[0]) ? 'group' : config.group_by;
+                
+                spec.encoding = {
+                    "x": {
+                        "field": xField,
+                        "type": "nominal",
+                        "title": config.x_label || config.x_axis,
+                        "axis": { "labelAngle": -45 }
+                    },
+                    "y": {
+                        "field": yField,
+                        "type": "quantitative",
+                        "title": config.y_label || config.y_axis
+                    }
+                };
+
+                if (groupField) {
+                    spec.encoding.color = { "field": groupField, "type": "nominal", "title": config.group_by };
+                }
+            }
+
+            vegaEmbed(`#${containerId}`, spec, { actions: false }).catch(console.error);
+        }
+
+        async function switchToChart(chartType, query, containerId, btn) {
+            try {
+                // UI feedback
+                const parent = btn.parentElement;
+                parent.querySelectorAll('.chart-type-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                btn.innerHTML = '<span class="loading" style="width: 12px; height: 12px; border-width: 2px;"></span>';
+
+                const response = await fetch('/api/v1/chat_to_chart', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        query: query,
+                        session_id: "default",
+                        chart_type: chartType
+                    })
+                });
+                const data = await response.json();
+
+                btn.innerHTML = chartType.charAt(0).toUpperCase() + chartType.slice(1);
+
+                if (data.chart_config && data.chart_data) {
+                    renderChart(containerId, data.chart_config, data.chart_data);
+                }
+            } catch (error) {
+                console.error('Error switching chart:', error);
+                btn.innerHTML = 'Error';
+            }
+        }
+
         function appendMessage(role, content, extra = {}) {
+            // Track history
+            if (role === 'user' || role === 'ai') {
+                chatHistory.push({
+                    role: role === 'ai' ? 'assistant' : 'user',
+                    content: content
+                });
+            }
+
             const msgDiv = document.createElement('div');
             msgDiv.className = `message ${role}`;
 
-            let html = `<div>${content}</div>`;
+            let html = `<div class="message-bubble"><div>${content}</div>`;
 
             if (extra.sql) {
                 html += `
@@ -463,17 +764,119 @@
             if (extra.execution_time_ms) {
                 html += `<div class="execution-info">Execution time: ${extra.execution_time_ms}ms</div>`;
             }
+            // If it's a chart, we render the container and then the chart
+            const chartData = extra.chart_data || extra.data;
+            if (extra.chart_config && chartData && chartData.length > 0) {
+                const chartId = `chart-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+                html += `<div id="${chartId}" class="chart-container"></div>`;
 
-            msgDiv.innerHTML = html;
-            chatContainer.appendChild(msgDiv);
+                // Chart Switcher UI
+                if (extra.original_query) {
+                    html += `
+                        <div class="chart-switcher" id="switcher-${chartId}">
+                            <button class="chart-type-btn ${extra.chart_config.chart_type === 'bar' ? 'active' : ''}" onclick="switchToChart('bar', '${extra.original_query.replace(/'/g, "\\'")}', '${chartId}', this)">Bar</button>
+                            <button class="chart-type-btn ${extra.chart_config.chart_type === 'line' ? 'active' : ''}" onclick="switchToChart('line', '${extra.original_query.replace(/'/g, "\\'")}', '${chartId}', this)">Line</button>
+                            <button class="chart-type-btn ${extra.chart_config.chart_type === 'pie' ? 'active' : ''}" onclick="switchToChart('pie', '${extra.original_query.replace(/'/g, "\\'")}', '${chartId}', this)">Pie</button>
+                            <button class="chart-type-btn ${extra.chart_config.chart_type === 'scatter' ? 'active' : ''}" onclick="switchToChart('scatter', '${extra.original_query.replace(/'/g, "\\'")}', '${chartId}', this)">Scatter</button>
+                            <button class="chart-type-btn ${extra.chart_config.chart_type === 'table' ? 'active' : ''}" onclick="switchToChart('table', '${extra.original_query.replace(/'/g, "\\'")}', '${chartId}', this)">Table</button>
+                            <button class="chart-type-btn ${extra.chart_config.chart_type === 'number' ? 'active' : ''}" onclick="switchToChart('number', '${extra.original_query.replace(/'/g, "\\'")}', '${chartId}', this)">Number</button>
+                        </div>
+                    `;
+                }
+
+                html += '</div>'; // Close message-bubble
+                msgDiv.innerHTML = html;
+                chatContainer.appendChild(msgDiv);
+
+                // Need to render after appending to DOM
+                renderChart(chartId, extra.chart_config, chartData);
+            } else if (role === 'ai' && extra.data && extra.data.length > 0) {
+                // Auto-generate chart if data is present but chart_config is missing
+                const chartId = `chart-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+                html += `
+                    <div id="${chartId}" class="chart-container">
+                        <div style="display: flex; flex-direction: column; align-items: center; gap: 0.5rem; color: var(--text-secondary);">
+                            <div class="loading"></div>
+                            <div style="font-size: 0.8rem;">Đang đề xuất biểu đồ phù hợp...</div>
+                        </div>
+                    </div>
+                    <div id="switcher-${chartId}"></div>
+                `;
+
+                html += '</div>'; // Close message-bubble
+                msgDiv.innerHTML = html;
+                chatContainer.appendChild(msgDiv);
+
+                // Fetch chart config
+                (async () => {
+                    try {
+                        const response = await fetch('/api/v1/chart', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                user_query: extra.original_query || "Data visualization",
+                                data: extra.data
+                            })
+                        });
+                        const chartRes = await response.json();
+                        if (chartRes.chart_config && chartRes.chart_data) {
+                            renderChart(chartId, chartRes.chart_config, chartRes.chart_data);
+                            
+                            // Also add switcher
+                            if (extra.original_query) {
+                                const switcher = document.getElementById(`switcher-${chartId}`);
+                                if (switcher) {
+                                    switcher.className = 'chart-switcher';
+                                    switcher.innerHTML = `
+                                        <button class="chart-type-btn ${chartRes.chart_config.chart_type === 'bar' ? 'active' : ''}" onclick="switchToChart('bar', '${extra.original_query.replace(/'/g, "\\'")}', '${chartId}', this)">Bar</button>
+                                        <button class="chart-type-btn ${chartRes.chart_config.chart_type === 'line' ? 'active' : ''}" onclick="switchToChart('line', '${extra.original_query.replace(/'/g, "\\'")}', '${chartId}', this)">Line</button>
+                                        <button class="chart-type-btn ${chartRes.chart_config.chart_type === 'pie' ? 'active' : ''}" onclick="switchToChart('pie', '${extra.original_query.replace(/'/g, "\\'")}', '${chartId}', this)">Pie</button>
+                                        <button class="chart-type-btn ${chartRes.chart_config.chart_type === 'scatter' ? 'active' : ''}" onclick="switchToChart('scatter', '${extra.original_query.replace(/'/g, "\\'")}', '${chartId}', this)">Scatter</button>
+                                        <button class="chart-type-btn ${chartRes.chart_config.chart_type === 'table' ? 'active' : ''}" onclick="switchToChart('table', '${extra.original_query.replace(/'/g, "\\'")}', '${chartId}', this)">Table</button>
+                                        <button class="chart-type-btn ${chartRes.chart_config.chart_type === 'number' ? 'active' : ''}" onclick="switchToChart('number', '${extra.original_query.replace(/'/g, "\\'")}', '${chartId}', this)">Number</button>
+                                    `;
+                                }
+                            }
+                        } else {
+                             document.getElementById(chartId).style.display = 'none';
+                        }
+                    } catch (e) {
+                        console.error('Auto-chart error:', e);
+                        document.getElementById(chartId).style.display = 'none';
+                    }
+                })();
+            } else {
+                html += '</div>'; // Close message-bubble
+                msgDiv.innerHTML = html;
+                chatContainer.appendChild(msgDiv);
+            }
+
+            // Render recommendations
+            if (extra.recommend_questions && extra.recommend_questions.length > 0) {
+                const recDiv = document.createElement('div');
+                recDiv.className = 'recommendations';
+                extra.recommend_questions.forEach(q => {
+                    const btn = document.createElement('button');
+                    btn.className = 'recommend-btn';
+                    btn.innerText = q;
+                    btn.onclick = () => sendMessage(q);
+                    recDiv.appendChild(btn);
+                });
+                chatContainer.appendChild(recDiv);
+            }
+
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
 
-        async function sendMessage() {
-            const query = userInput.value.trim();
+        async function sendMessage(presetQuery = null) {
+            const query = presetQuery || userInput.value.trim();
             if (!query) return;
 
-            userInput.value = '';
+            // Hide initial suggestions on first message
+            const initialSuggestions = document.getElementById('initial-suggestions');
+            if (initialSuggestions) initialSuggestions.style.display = 'none';
+
+            if (!presetQuery) userInput.value = '';
             appendMessage('user', query);
 
             sendBtn.disabled = true;
@@ -482,7 +885,9 @@
             const endpoint = selectedTables.size > 0 ? '/api/v1/chat_with_table' : '/api/v1/chat';
             const body = {
                 query: query,
-                session_id: "default"
+                session_id: "default",
+                history: chatHistory.slice(0, -1), // Send previous history
+                num_recommend: 3
             };
             if (selectedTables.size > 0) {
                 body.selected_tables = Array.from(selectedTables);
@@ -502,7 +907,11 @@
                     appendMessage('ai', data.answer, {
                         sql: data.sql,
                         data: data.data,
-                        execution_time_ms: data.execution_time_ms
+                        execution_time_ms: data.execution_time_ms,
+                        chart_config: data.chart_config,
+                        chart_data: data.chart_data,
+                        recommend_questions: data.recommend_questions,
+                        original_query: query // Pass query for chart switching
                     });
                 }
             } catch (error) {
@@ -514,12 +923,13 @@
             }
         }
 
-        sendBtn.onclick = sendMessage;
+        sendBtn.onclick = () => sendMessage();
         userInput.onkeypress = (e) => {
             if (e.key === 'Enter') sendMessage();
         };
 
         fetchTables();
+        renderInitialSuggestions();
     </script>
 </body>
 

@@ -1,0 +1,276 @@
+{
+  "answer": "Dưới đây là phân bổ số lượng sinh viên theo các ngành học. Bạn có thể xem biểu đồ để hình dung rõ hơn về dữ liệu này.",
+  "answer_format": "chart+text",
+  "sql": "SELECT \"maNganh\", COUNT(*) as \"soSinhVien\" FROM \"SinhVien\" WHERE \"trangThaiHoc\" = 'Đang học' GROUP BY \"maNganh\"",
+  "data": [
+    {
+      "maNganh": "8480101",
+      "soSinhVien": 163
+    },
+    {
+      "maNganh": "7329001",
+      "soSinhVien": 1422
+    },
+    {
+      "maNganh": "7320104",
+      "soSinhVien": 751
+    },
+    {
+      "maNganh": "7340101",
+      "soSinhVien": 2400
+    },
+    {
+      "maNganh": "7320108",
+      "soSinhVien": 76
+    },
+    {
+      "maNganh": "7480102",
+      "soSinhVien": 311
+    },
+    {
+      "maNganh": "7480202",
+      "soSinhVien": 1386
+    },
+    {
+      "maNganh": "7320101",
+      "soSinhVien": 314
+    },
+    {
+      "maNganh": "7510301",
+      "soSinhVien": 1366
+    },
+    {
+      "maNganh": "7340115",
+      "soSinhVien": 1367
+    },
+    {
+      "maNganh": "7340122",
+      "soSinhVien": 709
+    },
+    {
+      "maNganh": "8480104",
+      "soSinhVien": 246
+    },
+    {
+      "maNganh": "7340301",
+      "soSinhVien": 920
+    },
+    {
+      "maNganh": "7520207",
+      "soSinhVien": 2657
+    },
+    {
+      "maNganh": "8520203",
+      "soSinhVien": 33
+    },
+    {
+      "maNganh": "7520216",
+      "soSinhVien": 261
+    },
+    {
+      "maNganh": "7340208",
+      "soSinhVien": 614
+    },
+    {
+      "maNganh": "7480101",
+      "soSinhVien": 538
+    },
+    {
+      "maNganh": "7480201",
+      "soSinhVien": 8737
+    },
+    {
+      "maNganh": "8340101",
+      "soSinhVien": 145
+    },
+    {
+      "maNganh": "8520208",
+      "soSinhVien": 62
+    },
+    {
+      "maNganh": "7480107",
+      "soSinhVien": 150
+    },
+    {
+      "maNganh": "7480201_VN",
+      "soSinhVien": 213
+    },
+    {
+      "maNganh": "7480201_UDU",
+      "soSinhVien": 761
+    },
+    {
+      "maNganh": "7340101_SCU",
+      "soSinhVien": 14
+    },
+    {
+      "maNganh": "7340301_ACCA",
+      "soSinhVien": 39
+    },
+    {
+      "maNganh": "7340101_LOG",
+      "soSinhVien": 103
+    },
+    {
+      "maNganh": "7480201_LK",
+      "soSinhVien": 18
+    },
+    {
+      "maNganh": "7480202_CLC",
+      "soSinhVien": 107
+    },
+    {
+      "maNganh": "7480201_CLC",
+      "soSinhVien": 305
+    },
+    {
+      "maNganh": "7340205_LK",
+      "soSinhVien": 1
+    },
+    {
+      "maNganh": "7320104_CLC",
+      "soSinhVien": 93
+    },
+    {
+      "maNganh": "7340115_CLC",
+      "soSinhVien": 133
+    },
+    {
+      "maNganh": "7329001_GAM",
+      "soSinhVien": 366
+    },
+    {
+      "maNganh": "7340301_CLC",
+      "soSinhVien": 69
+    },
+    {
+      "maNganh": "7340115_QHC",
+      "soSinhVien": 105
+    },
+    {
+      "maNganh": "7510301_MBD",
+      "soSinhVien": 152
+    },
+    {
+      "maNganh": "7480201_SCU",
+      "soSinhVien": 20
+    },
+    {
+      "maNganh": "7320104_LK",
+      "soSinhVien": 5
+    },
+    {
+      "maNganh": "7520207_AioT",
+      "soSinhVien": 83
+    }
+  ],
+  "chart_config": {
+    "chart_type": "pie",
+    "x_axis": "maNganh",
+    "y_axis": "soSinhVien",
+    "group_by": null,
+    "title": "Phân bổ sinh viên theo ngành học",
+    "x_label": "Ngành học",
+    "y_label": "Số sinh viên"
+  },
+  "chart_data": [
+    {
+      "x": "7480201",
+      "y": 8737,
+      "maNganh": "7480201",
+      "soSinhVien": 8737
+    },
+    {
+      "x": "7520207",
+      "y": 2657,
+      "maNganh": "7520207",
+      "soSinhVien": 2657
+    },
+    {
+      "x": "7340101",
+      "y": 2400,
+      "maNganh": "7340101",
+      "soSinhVien": 2400
+    },
+    {
+      "x": "7329001",
+      "y": 1422,
+      "maNganh": "7329001",
+      "soSinhVien": 1422
+    },
+    {
+      "x": "7480202",
+      "y": 1386,
+      "maNganh": "7480202",
+      "soSinhVien": 1386
+    },
+    {
+      "x": "7340115",
+      "y": 1367,
+      "maNganh": "7340115",
+      "soSinhVien": 1367
+    },
+    {
+      "x": "7510301",
+      "y": 1366,
+      "maNganh": "7510301",
+      "soSinhVien": 1366
+    },
+    {
+      "x": "7340301",
+      "y": 920,
+      "maNganh": "7340301",
+      "soSinhVien": 920
+    },
+    {
+      "x": "7480201_UDU",
+      "y": 761,
+      "maNganh": "7480201_UDU",
+      "soSinhVien": 761
+    },
+    {
+      "x": "7320104",
+      "y": 751,
+      "maNganh": "7320104",
+      "soSinhVien": 751
+    },
+    {
+      "x": "7340122",
+      "y": 709,
+      "maNganh": "7340122",
+      "soSinhVien": 709
+    },
+    {
+      "x": "7340208",
+      "y": 614,
+      "maNganh": "7340208",
+      "soSinhVien": 614
+    },
+    {
+      "x": "Khác",
+      "y": 4125,
+      "maNganh": "Khác",
+      "soSinhVien": 4125
+    }
+  ],
+  "chart_type": "pie",
+  "column_profiles": [
+    {
+      "col_name": "maNganh",
+      "inferred_type": "string",
+      "role": "dimension",
+      "n_unique": 40,
+      "has_nulls": false
+    },
+    {
+      "col_name": "soSinhVien",
+      "inferred_type": "integer",
+      "role": "measure",
+      "n_unique": 40,
+      "has_nulls": false
+    }
+  ],
+  "execution_time_ms": 30.71,
+  "intent": "data_query",
+  "error": null
+}

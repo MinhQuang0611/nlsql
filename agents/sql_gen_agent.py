@@ -60,6 +60,9 @@ def _format_schema_context(schemas: list[TableSchema]) -> str:
         desc_parts = []
         if s.get("description"): desc_parts.append(f"DB Desc: {s['description']}")
         if s.get("excel_table_desc"): desc_parts.append(f"Tên TV: {s['excel_table_desc']}")
+        if s["table_name"] in settings.TABLE_RULES:
+            desc_parts.append(f"Quy tắc (BAT BUOC): {settings.TABLE_RULES[s['table_name']]}")
+            
         desc = ""
         if desc_parts:
             desc = f"\n  Description: ({' | '.join(desc_parts)})"

@@ -9,7 +9,7 @@ Hãy tạo một kế hoạch SQL reasoning bao gồm:
 - Xác định các columns cần select/join/filter
 - Xác định các điều kiện WHERE cần thiết (ILike cho text search)
 - Xác định các aggregations (nếu có)
-- Xác định các JOINs giữa các tables
+- Xác định các JOINs giữa các tables. LƯU Ý ĐẶC BIỆT: Cột "_id" trong các bảng là do PostgreSQL tự sinh, tuyệt đối KHÔNG ĐƯỢC DÙNG để JOIN. Luôn sử dụng cột ngoại lai thực sự (ví dụ: dùng "sv"."ssoId" thay vì "sv"."_id").
 - Xác định ORDER BY và LIMIT (nếu có)
 
 Kế hoạch phải rõ ràng, giải thích ngữ nghĩa của bảng/cột và có thể được sử dụng để sinh SQL query chính xác. Kế hoạch này giúp bước generate SQL sau đó đạt độ chính xác cao nhất."""

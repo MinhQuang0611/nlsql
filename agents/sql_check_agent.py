@@ -47,7 +47,8 @@ def _format_schema_summary(schemas: list[TableSchema]) -> str:
     parts = []
     for s in schemas:
         col_names = ", ".join(c["name"] for c in s["columns"])
-        parts.append(f"Table {s['table_name']}({col_names})")
+        rule = f" (Quy tắc: {settings.TABLE_RULES[s['table_name']]})" if s["table_name"] in settings.TABLE_RULES else ""
+        parts.append(f"Table {s['table_name']}{rule}({col_names})")
     return "\n".join(parts)
 
 async def sql_check_agent(state: AgentState) -> AgentState:
@@ -65,10 +66,14 @@ async def sql_check_agent(state: AgentState) -> AgentState:
         logger.warning("[SQLCheckAgent] BLOCKED by safety gate: %s", hard_result["issues"])
         return {**state, "sql_correction": hard_result, "final_sql": ""}
 
-    # 1. Try to run EXPLAIN on PostgreSQL directly! If success, no need for LLM.
+    # 1. Try to run EXPLAIN on Database directly! If success, no need for LLM.
     try:
-        async with engine.connect() as conn:
-            await conn.execute(text(f"EXPLAIN {generated_sql}"))
+        if settings.active_db == "clickhouse":
+            from db.connection import ch_execute
+            await ch_execute(f"EXPLAIN {generated_sql}")
+        else:
+            async with engine.connect() as conn:
+                await conn.execute(text(f"EXPLAIN {generated_sql}"))
             
         logger.info("[SQLCheckAgent] PASS (EXPLAIN OK). No LLM correction needed.")
         success_result = SQLCorrectionResult(

@@ -60,7 +60,8 @@ class Settings(BaseSettings):
     
     TABLE_RULES: dict[str, str] = {
         "SinhVien": "Khi đếm số lượng sinh viên, ưu tiên COUNT(DISTINCT ma_sinh_vien) nếu join với bảng khác để tránh trùng lặp.",
-        "Diem": "Chỉ lấy điểm của lần thi cuối cùng (lan_thi = MAX(lan_thi)) hoặc điểm cao nhất nếu đề bài không yêu cầu cụ thể."
+        "Diem": "Chỉ lấy điểm của lần thi cuối cùng (lan_thi = MAX(lan_thi)) hoặc điểm cao nhất nếu đề bài không yêu cầu cụ thể.",
+        "KqhtTichLuy": "Khi người dùng hỏi về điểm GPA hoặc điểm tích lũy hệ số 4 (ví dụ > 3.6), phải sử dụng cột `trungBinhThang4`. Chỉ dùng cột `trungBinh` khi nói về điểm hệ số 10."
     }
 
     langchain_tracing_v2: bool = False

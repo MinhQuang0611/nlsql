@@ -1,4 +1,5 @@
 import logging
+import time
 from fastapi import APIRouter, HTTPException
 from api.schemas.chat import ChatRequest, ChatWithTableRequest, ChatResponse
 from graph.builder import build_graph
@@ -19,11 +20,19 @@ async def _process_chat(initial_state: dict) -> ChatResponse:
 
     try:
         final_state = initial_state.copy()
+        node_times = {}
+        start_total = time.perf_counter()
+        last_step_time = start_total
 
         async for output in graph_app.astream(initial_state):
+            current_time = time.perf_counter()
+            step_duration = (current_time - last_step_time) * 1000
+            last_step_time = current_time
+
             for node_name, state_update in output.items():
+                node_times[node_name] = round(step_duration, 2)
                 logger.info("=" * 60)
-                logger.info(f"👉 STEP FINISHED: {node_name.upper()}")
+                logger.info(f"👉 STEP FINISHED: {node_name.upper()} ({node_times[node_name]} ms)")
                 logger.info("📦 OUTPUT KẾT QUẢ TỪ AGENT:")
                 for k, v in state_update.items():
                     val_str = str(v)
@@ -46,6 +55,9 @@ async def _process_chat(initial_state: dict) -> ChatResponse:
             except Exception as rec_err:
                 logger.warning("[Chat] Không thể sinh recommend questions: %s", rec_err)
 
+        total_execution_time = round((time.perf_counter() - start_total) * 1000, 2)
+        slowest_node = max(node_times, key=node_times.get) if node_times else None
+
         response = ChatResponse(
             answer=final_state.get("answer", "Hệ thống gặp lỗi, không thể trả lời."),
             answer_format=final_state.get("answer_format", "text"),
@@ -53,6 +65,9 @@ async def _process_chat(initial_state: dict) -> ChatResponse:
             data=final_state.get("query_result", []),
             chart_config=final_state.get("chart_config"),
             execution_time_ms=final_state.get("execution_time_ms", 0.0),
+            total_execution_time=total_execution_time,
+            node_execution_times=node_times,
+            slowest_node=slowest_node,
             intent=final_state.get("intent", "unknown"),
             error=final_state.get("executor_error"),
             recommend_questions=recommend_questions,

@@ -22,7 +22,7 @@ _llm = ChatOpenAI(
 
 class IntentClassifierSchema(BaseModel):
     intent: str = Field(description='Ý định của người dùng: "greeting", "data_query", "chart_request", "schema_question", "out_of_scope", hoặc "ambiguous".')
-    reasoning: str = Field(description='Lý do phân loại ý định này.')
+    # reasoning: str = Field(description='Lý do phân loại ý định này.')
     clarification_question: Optional[str] = Field(default=None, description='Nếu intent là "ambiguous", vui lòng đặt câu hỏi ở đây để làm rõ.')
 
 VALID_INTENTS = {"data_query", "chart_request", "schema_question", "greeting", "out_of_scope", "ambiguous"}
@@ -45,7 +45,7 @@ async def intent_agent(state: AgentState) -> AgentState:
     try:
         response = await llm_structured.ainvoke(messages)
         intent = response.intent
-        reasoning = response.reasoning
+        # reasoning = response.reasoning
         clarification_question = response.clarification_question
 
         if intent not in VALID_INTENTS:
@@ -55,7 +55,9 @@ async def intent_agent(state: AgentState) -> AgentState:
     except Exception as exc:
         logger.error("[IntentAgent] parsed error: %s", exc, exc_info=True)
         intent = "out_of_scope"
-        reasoning = f"Parse error: {exc}"
+        # reasoning = f"Parse error: {exc}"
 
     logger.info("[IntentAgent] intent=%s", intent)
-    return {**state, "intent": intent, "intent_reasoning": reasoning, "clarification_question": clarification_question}
+    return {**state, "intent": intent,
+    #  "intent_reasoning": reasoning, 
+     "clarification_question": clarification_question}

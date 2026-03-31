@@ -1,6 +1,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import logging
 from contextlib import asynccontextmanager
@@ -46,6 +47,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Checking/indexing schema...")
     await index_schema_main()
 
+    # Tự động sync knowledge từ Google Sheet (không block nếu lỗi)
+    try:
+        from scripts.index_knowledge import run as sync_knowledge
+        logger.info("Syncing knowledge from Google Sheet...")
+        synced = await asyncio.to_thread(sync_knowledge, False)  # force=False → upsert
+        logger.info("Knowledge sync done: %d entries.", synced)
+    except Exception as ke:
+        logger.warning("Knowledge sync skipped (non-fatal): %s", ke)
+
     logger.info("nlsql ready ")
     yield
 
@@ -75,9 +85,11 @@ def create_app() -> FastAPI:
 
     from api.routers.tables import router as tables_router
     from api.routers.chart import router as chart_router
+    from api.routers.knowledge import router as knowledge_router
     app.include_router(chat_router, prefix="/api/v1")
     app.include_router(tables_router, prefix="/api/v1")
     app.include_router(chart_router, prefix="/api/v1")
+    app.include_router(knowledge_router, prefix="/api/v1")
 
     # Static files
     static_dir = os.path.join(os.path.dirname(__file__), "static")

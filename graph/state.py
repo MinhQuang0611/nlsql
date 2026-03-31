@@ -81,6 +81,8 @@ class AgentState(TypedDict, total=False):
     chart_config: Optional[ChartConfig] 
     chart_data: Optional[list[dict]]    
 
+    history: list[dict]                      # Lịch sử hội thoại [{"role": "user/assistant", "content": "..."}]
+    knowledge_context: Optional[str]         # Kết quả RAG từ Knowledge Agent (dùng cho domain_query / knowledge_query)
     clarification_question: Optional[str]  # Câu hỏi làm rõ khi intent là ambiguous
 
     answer: str                      

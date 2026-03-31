@@ -60,14 +60,27 @@ def _format_schema_context(schemas: list[TableSchema]) -> str:
     return "\n\n".join(parts)
 
 
+def _format_history(history: list[dict]) -> str:
+    """Chuyển list history thành chuỗi dễ đọc cho LLM."""
+    if not history:
+        return "(Không có lịch sử hội thoại)"
+    lines = []
+    for msg in history:
+        role = "Người dùng" if msg.get("role") == "user" else "Trợ lý"
+        lines.append(f"{role}: {msg.get('content', '')}")
+    return "\n".join(lines)
+
+
 async def sql_plan_agent(state: AgentState) -> AgentState:
     """
     LangGraph node: generates a reasoning plan for SQL construction.
-    Reads: user_query, schema_context
+    Reads: user_query, schema_context, history
     Writes: query_plan
     """
     user_query = state.get("user_query", "")
     schema_context = state.get("schema_context", [])
+    history = state.get("history", [])
+    history_text = _format_history(history)
     
     if not schema_context:
         logger.warning("[SQLPlanAgent] No schemas available. Skipping plan.")
@@ -79,14 +92,21 @@ async def sql_plan_agent(state: AgentState) -> AgentState:
         SystemMessage(content=SQL_PLAN_SYSTEM),
         HumanMessage(content=SQL_PLAN_HUMAN.format(
             user_query=user_query,
-            schema_context=schema_str
+            schema_context=schema_str,
+            history_text=history_text,
         )),
     ]
 
+<<<<<<< HEAD
     logger.info("[SQLPlanAgent] Generating reasoning plan for query=%r...", user_query)
     # response = await _llm.ainvoke(messages)
     query_plan = ""
     # query_plan = response.content.strip()
+=======
+    logger.info("[SQLPlanAgent] Generating reasoning plan for query=%r, history_len=%d...", user_query, len(history))
+    response = await _llm.ainvoke(messages)
+    query_plan = response.content.strip()
+>>>>>>> 8b8ad016f (pull)
 
     logger.info("[SQLPlanAgent] Generated Plan:\n%s", query_plan)
 

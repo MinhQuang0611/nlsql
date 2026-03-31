@@ -1,0 +1,14 @@
+{
+  "import/icon.ts -> @ant-design/icons/lib/components/Icon": {
+    "id": "import/icon.ts -> @ant-design/icons/lib/components/Icon",
+    "files": [
+      "static/chunks/node_modules_ant-design_icons_lib_components_Icon_js.js"
+    ]
+  },
+  "pages/home/index.tsx -> @/components/chart/ChatChartAnswer": {
+    "id": "pages/home/index.tsx -> @/components/chart/ChatChartAnswer",
+    "files": [
+      "static/chunks/src_components_chart_ChatChartAnswer_tsx.js"
+    ]
+  }
+}

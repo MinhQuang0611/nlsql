@@ -25,15 +25,32 @@ class IntentClassifierSchema(BaseModel):
     # reasoning: str = Field(description='Lý do phân loại ý định này.')
     clarification_question: Optional[str] = Field(default=None, description='Nếu intent là "ambiguous", vui lòng đặt câu hỏi ở đây để làm rõ.')
 
-VALID_INTENTS = {"data_query", "chart_request", "schema_question", "greeting", "out_of_scope", "ambiguous"}
+VALID_INTENTS = {"data_query", "chart_request", "schema_question", "greeting", "out_of_scope", "ambiguous", "knowledge_query", "domain_query"}
+
+
+def _format_history(history: list[dict]) -> str:
+    """Chuyển list history [{"role": ..., "content": ...}] thành chuỗi dễ đọc cho LLM."""
+    if not history:
+        return "(Không có lịch sử hội thoại)"
+    lines = []
+    for msg in history:
+        role = "Người dùng" if msg.get("role") == "user" else "Trợ lý"
+        lines.append(f"{role}: {msg.get('content', '')}")
+    return "\n".join(lines)
+
 
 async def intent_agent(state: AgentState) -> AgentState:
     user_query = state.get("user_query", "")
-    logger.info("[IntentAgent] query=%r", user_query)
+    history = state.get("history", [])
+    history_text = _format_history(history)
+    logger.info("[IntentAgent] query=%r, history_len=%d", user_query, len(history))
 
     messages = [
         SystemMessage(content=INTENT_SYSTEM),
-        HumanMessage(content=INTENT_HUMAN.format(user_query=user_query)),
+        HumanMessage(content=INTENT_HUMAN.format(
+            user_query=user_query,
+            history_text=history_text,
+        )),
     ]
 
     llm_structured = _llm.with_structured_output(IntentClassifierSchema)

@@ -16,7 +16,9 @@ graph_app = build_graph()
 
 async def _process_chat(initial_state: dict) -> ChatResponse:
     num_recommend: int = initial_state.pop("num_recommend", 3)
-    history: list = initial_state.pop("history", [])
+    # Dùng .get() thay vì .pop() để history vẫn còn trong initial_state
+    # và được truyền vào graph cho các agent sử dụng
+    history: list = initial_state.get("history", [])
 
     try:
         final_state = initial_state.copy()

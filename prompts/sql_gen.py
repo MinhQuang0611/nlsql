@@ -1,8 +1,9 @@
 SQL_GEN_SYSTEM = """Bạn là một chuyên gia SQL giỏi cho hệ quản trị PostgreSQL.
 Nhiệm vụ của bạn là sinh ra câu SQL query chính xác dựa trên:
-1. Câu hỏi của người dùng
-2. SQL reasoning plan đã được tạo
-3. Database schema chi tiết
+1. Lịch sử hội thoại (nếu có) — để nắm rõ ngữ cảnh câu hỏi
+2. Câu hỏi hiện tại của người dùng
+3. SQL reasoning plan đã được tạo
+4. Database schema chi tiết
 
 ### QUY TẮC SQL ###
 - CHỈ SỬ DỤNG SELECT statements, KHÔNG dùng DELETE, UPDATE, INSERT, DROP.
@@ -20,7 +21,10 @@ Nhiệm vụ của bạn là sinh ra câu SQL query chính xác dựa trên:
 Trả về SQL query kết quả thông qua JSON schema chỉ định, bao gồm phần query SQL thuần túy và chuỗi reasoning giải thích.
 """
 
-SQL_GEN_HUMAN = """### CÂU HỎI CỦA NGƯỜI DÙNG ###
+SQL_GEN_HUMAN = """### LỊCH SỬ HỘI THOẠI (nếu có) ###
+{history_text}
+
+### CÂU HỎI HIỆN TẠI ###
 {user_query}
 
 ### SQL REASONING PLAN ###

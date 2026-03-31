@@ -59,7 +59,9 @@ class Settings(BaseSettings):
     }
     
     TABLE_RULES: dict[str, str] = {
-        "SinhVien": "Khi đếm số lượng sinh viên, ưu tiên COUNT(DISTINCT ma_sinh_vien) nếu join với bảng khác để tránh trùng lặp.",
+        "SinhVien": "Khi đếm số lượng sinh viên, ưu tiên COUNT(DISTINCT ma_sinh_vien) nếu join với bảng khác để tránh trùng lặp. Khi được hỏi về 'ngành học' của sinh viên, KHÔNG JOIN với bảng KhoaNganh, mà phải JOIN với bảng Nganh thông qua maNganh.",
+        "Nganh": "Bảng đại diện cho ngành học. Khi câu hỏi hỏi về 'Ngành', 'Ngành học' (ví dụ top 5 ngành), luôn dùng bảng Nganh và không nhầm lẫn với bảng KhoaNganh.",
+        "KhoaNganh": "CHỈ dùng bảng này khi câu hỏi NHẮC CỤ THỂ đến Khoa (Department). Nếu hỏi về ngành (Major), hãy dùng bảng Nganh.",
         "Diem": "Chỉ lấy điểm của lần thi cuối cùng (lan_thi = MAX(lan_thi)) hoặc điểm cao nhất nếu đề bài không yêu cầu cụ thể.",
         "KqhtTichLuy": "Khi người dùng hỏi về điểm GPA hoặc điểm tích lũy hệ số 4 (ví dụ > 3.6), phải sử dụng cột `trungBinhThang4`. Chỉ dùng cột `trungBinh` khi nói về điểm hệ số 10."
     }

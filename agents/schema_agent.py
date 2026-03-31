@@ -282,10 +282,12 @@ async def schema_agent(state: AgentState) -> AgentState:
             try:
                 all_table_names = await _fetch_all_tables()
                 table_list_str = "\n".join(f"- {t}" for t in all_table_names)
+                rules_str = "\n".join(f"- {k}: {v}" for k, v in settings.TABLE_RULES.items())
                 fallback_prompt = (
                     f"Người dùng hỏi: {user_query}\n\n"
                     f"Danh sách tất cả các bảng trong cơ sở dữ liệu:\n{table_list_str}\n\n"
-                    "Hãy liệt kê tên các bảng CÓ THỂ LIÊN QUAN đến câu hỏi trên. "
+                    f"Lưu ý các quy tắc chọn bảng (RẤT QUAN TRỌNG):\n{rules_str}\n\n"
+                    "Hãy liệt kê tên các bảng CÓ THỂ LIÊN QUAN đến câu hỏi trên. Cố gắng chọn tối đa 5 bảng chính xác nhất.\n"
                     "Chỉ trả lời bằng danh sách tên bảng, mỗi bảng trên một dòng, không giải thích."
                 )
                 llm_response = _llm.invoke([HumanMessage(content=fallback_prompt)])

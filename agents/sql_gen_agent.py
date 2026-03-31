@@ -81,8 +81,19 @@ async def sql_gen_agent(state: AgentState) -> AgentState:
     schema_context = state.get("schema_context", [])
     query_plan = state.get("query_plan", "")
     retry_count = state.get("retry_count", 0)
+    history = state.get("history", [])
     
     schema_str = _format_schema_context(schema_context)
+
+    # Format history
+    if history:
+        lines = []
+        for msg in history:
+            role = "Người dùng" if msg.get("role") == "user" else "Trợ lý"
+            lines.append(f"{role}: {msg.get('content', '')}")
+        history_text = "\n".join(lines)
+    else:
+        history_text = "(Không có lịch sử hội thoại)"
 
     retry_hint = ""
     if retry_count > 0:
@@ -92,7 +103,7 @@ async def sql_gen_agent(state: AgentState) -> AgentState:
             issues="\n".join(f"  - {i}" for i in issues)
         )
 
-    logger.info("[SQLGenAgent] attempt=%d query=%r", retry_count + 1, user_query)
+    logger.info("[SQLGenAgent] attempt=%d query=%r, history_len=%d", retry_count + 1, user_query, len(history))
 
     # 1. Fetch Few-Shot Examples from Qdrant
     few_shot_str = "Không tìm thấy ví dụ (No few shot available)."
@@ -130,6 +141,7 @@ async def sql_gen_agent(state: AgentState) -> AgentState:
             schema_context=schema_str,
             few_shot_examples=few_shot_str,
             retry_hint=retry_hint,
+            history_text=history_text,
         )),
     ]
 

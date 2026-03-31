@@ -1,8 +1,9 @@
 SQL_PLAN_SYSTEM = """Bạn là một chuyên gia SQL planner. Nhiệm vụ của bạn là phân tích câu hỏi của người dùng và database schema để tạo ra một kế hoạch chi tiết cho việc sinh SQL query trên PostgreSQL.
 
 Dựa trên:
-1. Câu hỏi của người dùng
-2. Database schema từ các tables đã được retrieve
+1. Lịch sử hội thoại (nếu có) — để hiểu ngữ cảnh, câu hỏi follow-up hay làm rõ câu trước
+2. Câu hỏi hiện tại của người dùng
+3. Database schema từ các tables đã được retrieve
 
 Hãy tạo một kế hoạch SQL reasoning bao gồm:
 - Xác định các tables cần sử dụng
@@ -14,7 +15,10 @@ Hãy tạo một kế hoạch SQL reasoning bao gồm:
 
 Kế hoạch phải rõ ràng, giải thích ngữ nghĩa của bảng/cột và có thể được sử dụng để sinh SQL query chính xác. Kế hoạch này giúp bước generate SQL sau đó đạt độ chính xác cao nhất."""
 
-SQL_PLAN_HUMAN = """### CÂU HỎI CỦA NGƯỜI DÙNG ###
+SQL_PLAN_HUMAN = """### LỊCH SỬ HỘI THOẠI (nếu có) ###
+{history_text}
+
+### CÂU HỎI HIỆN TẠI ###
 {user_query}
 
 ### DATABASE SCHEMA ###

@@ -9,13 +9,14 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from config import get_settings
 from graph.state import AgentState
 from prompts.answer import ANSWER_SYSTEM, ANSWER_HUMAN
+from prompts.knowledge import DOMAIN_ANSWER_SYSTEM, DOMAIN_ANSWER_HUMAN
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
 _llm = ChatOpenAI(
     model=settings.openai_model,
-    temperature=0.3,  
+    temperature=0,  # Phải là 0 để đảm bảo kết quả deterministc, tránh số liệu bị diễn giải khác nhau
     api_key=settings.openai_api_key,
 )
 
@@ -28,8 +29,10 @@ async def answer_agent(state: AgentState) -> AgentState:
     query_result = state.get("query_result", [])
     row_count = state.get("row_count", 0)
     chart_config = state.get("chart_config")
+    knowledge_context = state.get("knowledge_context", "")
     intent = state.get("intent", "data_query")
     executor_error = state.get("executor_error")
+    history = state.get("history", [])
 
     if intent == "out_of_scope":
         return {
@@ -66,17 +69,40 @@ async def answer_agent(state: AgentState) -> AgentState:
     preview_rows = query_result[:_MAX_PREVIEW_ROWS]
     has_chart = chart_config is not None
 
-    logger.info("[AnswerAgent] generating answer for %d rows, has_chart=%s", row_count, has_chart)
+    # Format history
+    if history:
+        lines = []
+        for msg in history:
+            role = "Người dùng" if msg.get("role") == "user" else "Trợ lý"
+            lines.append(f"{role}: {msg.get('content', '')}")
+        history_text = "\n".join(lines)
+    else:
+        history_text = "(Không có lịch sử hội thoại)"
 
-    messages = [
-        SystemMessage(content=ANSWER_SYSTEM),
-        HumanMessage(content=ANSWER_HUMAN.format(
-            user_query=user_query,
-            row_count=row_count,
-            query_result=preview_rows,
-            has_chart=has_chart,
-        )),
-    ]
+    logger.info("[AnswerAgent] generating answer for %d rows, has_chart=%s, history_len=%d, has_knowledge=%s", row_count, has_chart, len(history), bool(knowledge_context))
+
+    # domain_query: tổng hợp DB + kiến thức nghiệp vụ
+    if knowledge_context and state.get("intent") == "domain_query":
+        messages = [
+            SystemMessage(content=DOMAIN_ANSWER_SYSTEM),
+            HumanMessage(content=DOMAIN_ANSWER_HUMAN.format(
+                knowledge_context=knowledge_context,
+                row_count=row_count,
+                query_result=preview_rows,
+                user_query=user_query,
+            )),
+        ]
+    else:
+        messages = [
+            SystemMessage(content=ANSWER_SYSTEM),
+            HumanMessage(content=ANSWER_HUMAN.format(
+                user_query=user_query,
+                row_count=row_count,
+                query_result=preview_rows,
+                has_chart=has_chart,
+                history_text=history_text,
+            )),
+        ]
 
     response = await _llm.ainvoke(messages)
     raw = response.content.strip()

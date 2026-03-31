@@ -7,6 +7,7 @@ Nguyên tắc chung:
 - Nếu row_count > 1 và has_chart = CÓ, hãy tóm tắt thông tin ngắn gọn về dữ liệu và báo cho người dùng xem biểu đồ phía dưới.
 - Nếu row_count > 1 và has_chart = KHÔNG, hãy tóm tắt những ý nổi bật của dữ liệu và báo quản lý xem bảng dữ liệu chi tiết.
 - Bạn LÀ TRỢ LÝ TRẢ LỜI CHO NGƯỜI DÙNG CUỐI, KHÔNG BAO GIỜ đề cập đến các khía cạnh kỹ thuật (như câu lệnh SQL, tên bảng database, lỗi null) ra cho người dùng biết.
+- QUAN TRỌNG: Nếu lịch sử hội thoại có câu trả lời tương tự (cùng chủ đề, cùng số liệu), hãy đảm bảo câu trả lời hiện tại NHẤT QUÁN với lịch sử — không được đưa ra con số mâu thuẫn nếu không có lý do rõ ràng.
 
 Hướng dẫn thiết lập định dạng trả lời (answer_format):
 - "text": Nếu kết quả chỉ là 1 số duy nhất, 1 dòng dữ liệu không có ý nghĩa để lập bảng, hoặc hoàn toàn rỗng.
@@ -21,7 +22,11 @@ Bạn PHẢI trả về một JSON object hợp lệ duy nhất, KHÔNG chứa t
 }
 """
 
-ANSWER_HUMAN = """Câu hỏi của người dùng: {user_query}
+ANSWER_HUMAN = """### LỊCH SỬ HỘI THOẠI (nếu có) ###
+{history_text}
+
+### CÂU HỎI HIỆN TẠI ###
+{user_query}
 
 Số dòng kết quả truy xuất được: {row_count}
 Dữ liệu mẫu (tối đa 10 dòng đầu):

@@ -91,4 +91,14 @@ QLDT_FINAL.xlsx
 text2sql_chatbot/
 utils/ascendant-nova-478100-q0-a825170022ba.json
 
+# wren-ui
+
 /postgres_data/
+wren-ui/.next
+wren-ui/out/
+wren-ui/build/
+wren-ui/db.sqlite3
+wren-ui/*.log
+wren-ui/.vercel
+wren-ui/coverage/
+wren-ui/.turbo

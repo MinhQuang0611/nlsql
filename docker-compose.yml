@@ -17,6 +17,23 @@ services:
       - qdrant
       - redis
 
+  wren-ui:
+    build:
+      context: ./wren-ui
+      dockerfile: Dockerfile.dev
+    container_name: nlsql_wren_ui
+    restart: always
+    volumes:
+      - ./wren-ui:/app
+      - /app/node_modules
+      - /app/.next
+    ports:
+      - "3003:3000"
+    environment:
+      - WREN_ENGINE_URL=http://app:8388
+    depends_on:
+      - app
+
   qdrant:
     image: qdrant/qdrant:latest
     container_name: nlsql_qdrant

@@ -1,106 +1,70 @@
-# =========================
-# OS files
-# =========================
+
+.env
+.env.*
+!.env.example
+
 .DS_Store
 Thumbs.db
 Desktop.ini
 
-# =========================
-# IDE / Editor
-# =========================
+
 .vscode/
 .idea/
 *.swp
 *.swo
-*.log
 
-# =========================
-# Python
-# =========================
-__pycache__/
+
+logs/
+*.log
+*logs.txt
+
+**pycache**/
 *.py[cod]
 *.pyo
 *.pyd
 *.egg
 *.egg-info/
+.eggs/
 dist/
 build/
-.eggs/
 *.sqlite3
-.env
 .venv/
 venv/
 env/
 
-# =========================
-# Node.js
-# =========================
+
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-package-lock.json
 pnpm-lock.yaml
+package-lock.json
 
-# =========================
-# Environment variables
-# =========================
-.env
-.env.*
-!.env.example
 
-# =========================
-# Logs
-# =========================
-logs/
-*.log
-
-# =========================
-# Docker
-# =========================
 docker-compose.override.yml
 
-# =========================
-# Coverage / Testing
-# =========================
+
 coverage/
 htmlcov/
 .pytest_cache/
 
-# =========================
-# Build / Output
-# =========================
-dist/
-build/
+
 out/
 
-# =========================
-# Misc
-# =========================
-*.tmp
-*.bak
-*.cache
 
-.env
-.env.example
-docker_logs.txt
-docker_logs2.txt
-docker_logs3.txt
-*logs.txt
 QLDT_FINAL.xlsx
 text2sql_chatbot/
+postgres_data/
 utils/ascendant-nova-478100-q0-a825170022ba.json
 
-# wren-ui
 
-/postgres_data/
-wren-ui/.next
+
+
+/postgres_data//
+wren-ui/.next/
 wren-ui/out/
 wren-ui/build/
 wren-ui/db.sqlite3
-wren-ui/*.log
-wren-ui/.vercel
 wren-ui/coverage/
-wren-ui/.turbo
-
-postgres_data/
+wren-ui/.turbo/
+wren-ui/.vercel/

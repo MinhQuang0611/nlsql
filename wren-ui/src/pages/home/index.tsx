@@ -170,11 +170,6 @@ export default function Home() {
   useEffect(() => {
     const s = loadSessions();
     setSessions(s);
-    const keys = Object.keys(s);
-    if (keys.length > 0) {
-      const lastSessionId = keys.sort((a, b) => (s[b].updatedAt || 0) - (s[a].updatedAt || 0))[0];
-      setActiveSessionId(lastSessionId);
-    }
 
     // Fetch tables
     fetch('/api/v1/tables').then(res => res.json()).then(setAvailableTables);

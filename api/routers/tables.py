@@ -1,24 +1,32 @@
 import logging
 import pandas as pd
 from typing import Dict
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from agents.schema_agent import _fetch_all_tables
+import os
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/tables", tags=["Tables"])
 
-# Cache the mapping
-_TABLE_MAPPING_CACHE: Dict[str, str] = {}
+# Cache the mapping per domain
+_TABLE_MAPPING_CACHE: Dict[str, Dict[str, str]] = {}
 
-def get_table_mapping() -> Dict[str, str]:
+def get_table_mapping(domain: str) -> Dict[str, str]:
     global _TABLE_MAPPING_CACHE
-    if _TABLE_MAPPING_CACHE:
-        return _TABLE_MAPPING_CACHE
+    if domain in _TABLE_MAPPING_CACHE:
+        return _TABLE_MAPPING_CACHE[domain]
+
+    mapping = {}
+    excel_file = f"{domain.upper()}_FINAL.xlsx"
+    if not os.path.exists(excel_file):
+        logger.warning(f"Metadata file {excel_file} not found. Returning empty mapping.")
+        _TABLE_MAPPING_CACHE[domain] = mapping
+        return mapping
 
     try:
         # Không fillna toàn bộ để giữ nguyên NaN, kiểm tra từng ô chính xác hơn
-        df = pd.read_excel("QLDT_FINAL.xlsx", sheet_name="Database Schema")
+        df = pd.read_excel(excel_file, sheet_name="Database Schema")
 
         for _, row in df.iterrows():
             ten_bang = row.get("Tên bảng")
@@ -31,20 +39,21 @@ def get_table_mapping() -> Dict[str, str]:
             tieng_viet_str = str(tieng_viet).strip() if pd.notna(tieng_viet) else ""
 
             if thuoc_tinh_str == "--- BẢNG ---" and ten_bang_str:
-                _TABLE_MAPPING_CACHE[ten_bang_str] = tieng_viet_str
-                logger.debug("Table mapping: %s → %s", ten_bang_str, tieng_viet_str)
+                mapping[ten_bang_str] = tieng_viet_str
+                logger.debug("Table mapping [%s]: %s → %s", domain, ten_bang_str, tieng_viet_str)
 
     except Exception as e:
-        logger.error(f"Failed to load Excel metadata: {e}")
+        logger.error(f"Failed to load Excel metadata for {domain}: {e}")
 
-    return _TABLE_MAPPING_CACHE
+    _TABLE_MAPPING_CACHE[domain] = mapping
+    return mapping
 
 @router.get("", response_model=Dict[str, str])
-async def list_tables():
-    logger.info("Fetching all available tables")
+async def list_tables(domain: str = Query("qldt", description="Database domain (qldt or tcns)")):
+    logger.info(f"Fetching all available tables for domain: {domain}")
     try:
-        tables = await _fetch_all_tables()
-        mapping = get_table_mapping()
+        tables = await _fetch_all_tables(domain)
+        mapping = get_table_mapping(domain)
         
         result = {}
         for table in tables:

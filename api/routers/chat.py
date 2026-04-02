@@ -167,6 +167,42 @@ async def chat_endpoint(request: ChatRequest) -> ChatResponse:
     return await _process_chat(initial_state)
 
 
+@router.post("/qldt/chat", response_model=ChatResponse, tags=["QLDT"])
+async def qldt_chat_endpoint(request: ChatRequest) -> ChatResponse:
+    logger.info(
+        "Received QLDT chat query: %r (session=%s, history_len=%d, num_recommend=%d)",
+        request.query, request.session_id, len(request.history), request.num_recommend,
+    )
+    initial_state = {
+        "user_query": request.query,
+        "session_id": request.session_id,
+        "user_id": request.user_id,
+        "retry_count": 0,
+        "history": [m.model_dump() for m in request.history],
+        "num_recommend": request.num_recommend,
+        "domain": "qldt",
+    }
+    return await _process_chat(initial_state)
+
+
+@router.post("/tcns/chat", response_model=ChatResponse, tags=["TCNS"])
+async def tcns_chat_endpoint(request: ChatRequest) -> ChatResponse:
+    logger.info(
+        "Received TCNS chat query: %r (session=%s, history_len=%d, num_recommend=%d)",
+        request.query, request.session_id, len(request.history), request.num_recommend,
+    )
+    initial_state = {
+        "user_query": request.query,
+        "session_id": request.session_id,
+        "user_id": request.user_id,
+        "retry_count": 0,
+        "history": [m.model_dump() for m in request.history],
+        "num_recommend": request.num_recommend,
+        "domain": "tcns",
+    }
+    return await _process_chat(initial_state)
+
+
 @router.post("/chat_with_table", response_model=ChatResponse)
 async def chat_with_table_endpoint(request: ChatWithTableRequest) -> ChatResponse:
     logger.info(
@@ -182,5 +218,45 @@ async def chat_with_table_endpoint(request: ChatWithTableRequest) -> ChatRespons
         "retry_count": 0,
         "history": [m.model_dump() for m in request.history],
         "num_recommend": request.num_recommend,
+    }
+    return await _process_chat(initial_state)
+
+
+@router.post("/qldt/chat_with_table", response_model=ChatResponse, tags=["QLDT"])
+async def qldt_chat_with_table_endpoint(request: ChatWithTableRequest) -> ChatResponse:
+    logger.info(
+        "Received QLDT chat_with_table query: %r (session=%s, tables=%s, history_len=%d, num_recommend=%d)",
+        request.query, request.session_id, request.selected_tables,
+        len(request.history), request.num_recommend,
+    )
+    initial_state = {
+        "user_query": request.query,
+        "session_id": request.session_id,
+        "user_id": request.user_id,
+        "selected_tables": request.selected_tables,
+        "retry_count": 0,
+        "history": [m.model_dump() for m in request.history],
+        "num_recommend": request.num_recommend,
+        "domain": "qldt",
+    }
+    return await _process_chat(initial_state)
+
+
+@router.post("/tcns/chat_with_table", response_model=ChatResponse, tags=["TCNS"])
+async def tcns_chat_with_table_endpoint(request: ChatWithTableRequest) -> ChatResponse:
+    logger.info(
+        "Received TCNS chat_with_table query: %r (session=%s, tables=%s, history_len=%d, num_recommend=%d)",
+        request.query, request.session_id, request.selected_tables,
+        len(request.history), request.num_recommend,
+    )
+    initial_state = {
+        "user_query": request.query,
+        "session_id": request.session_id,
+        "user_id": request.user_id,
+        "selected_tables": request.selected_tables,
+        "retry_count": 0,
+        "history": [m.model_dump() for m in request.history],
+        "num_recommend": request.num_recommend,
+        "domain": "tcns",
     }
     return await _process_chat(initial_state)

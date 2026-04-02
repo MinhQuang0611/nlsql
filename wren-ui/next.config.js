@@ -22,6 +22,7 @@ const nextConfig = withLess({
   transpilePackages: ['vega-lite', 'vega-embed', 'vega'],
   experimental: {
     esmExternals: 'loose',
+    proxyTimeout: 300000,
   },
   staticPageGenerationTimeout: 1000,
   compiler: {

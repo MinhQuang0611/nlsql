@@ -112,18 +112,31 @@
             <!-- TAB 1: DANH SÁCH LUẬT -->
             <div class="tab-pane fade show active" id="list-pane" role="tabpanel" aria-labelledby="list-tab">
                 <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <span>Danh sách các từ khoá nghiệp vụ đang có trong hệ thống</span>
-                        <button class="btn btn-sm btn-outline-primary" onclick="loadRules()">
-                            <i class="fa-solid fa-rotate-right"></i> Làm mới
-                        </button>
+                    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <div class="d-flex align-items-center gap-2 flex-grow-1">
+                            <span class="fw-bold"><i class="fa-solid fa-list"></i> Danh sách Luật</span>
+                            <div class="input-group input-group-sm ms-3" style="max-width: 400px;">
+                                <input type="text" id="search-input" class="form-control" placeholder="Tìm kiếm bằng nội dung/ý nghĩa...">
+                                <button class="btn btn-primary" type="button" onclick="searchRules()">
+                                    <i class="fa-solid fa-magnifying-glass"></i> Tìm
+                                </button>
+                                <button class="btn btn-outline-secondary d-none" type="button" id="clear-search-btn" onclick="clearSearch()" title="Xoá tìm kiếm">
+                                    <i class="fa-solid fa-xmark"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="action-btns">
+                            <button class="btn btn-sm btn-outline-primary" onclick="loadRules()">
+                                <i class="fa-solid fa-rotate-right"></i> Làm mới
+                            </button>
+                        </div>
                     </div>
                     <div class="card-body">
                         <div id="rules-loading" class="text-center py-4 text-muted">
                             <div class="spinner-border spinner-border-sm" role="status"></div> Đang tải dữ liệu...
                         </div>
                         <div id="rules-empty" class="alert alert-info d-none">
-                            Chưa có quy định nào. Hãy chuyển sang tab "Thêm mới" để tạo luật.
+                            Chưa có quy định nào hoặc không tìm thấy kết quả phù hợp.
                         </div>
                         <div id="rules-container">
                             <!-- Rule items will be appended here -->
@@ -206,6 +219,11 @@
                 e.preventDefault();
                 createRule();
             });
+
+            // Enter to search
+            document.getElementById('search-input').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') searchRules();
+            });
         });
 
         // Hàm hiển thị Toast thông báo
@@ -237,56 +255,110 @@
 
         // Lấy danh sách luật
         async function loadRules() {
-            const container = document.getElementById('rules-container');
             const loader = document.getElementById('rules-loading');
+            const container = document.getElementById('rules-container');
             const emptyMsg = document.getElementById('rules-empty');
             
             container.innerHTML = '';
             loader.classList.remove('d-none');
             emptyMsg.classList.add('d-none');
+            document.getElementById('clear-search-btn').classList.add('d-none');
+            document.getElementById('search-input').value = '';
 
             try {
                 const response = await fetch(API_URL);
                 if (!response.ok) throw new Error("Network response was not ok");
                 
                 const data = await response.json();
-                
-                loader.classList.add('d-none');
-                
-                if (data.length === 0) {
-                    emptyMsg.classList.remove('d-none');
-                    return;
-                }
-
-                data.forEach(rule => {
-                    const html = `
-                        <div class="rule-item" id="rule-${rule.id}">
-                            <div class="d-flex justify-content-between align-items-start">
-                                <div>
-                                    <div class="rule-keyword"><i class="fa-solid fa-tag text-primary me-2"></i>${escapeHtml(rule.tu_khoa)}</div>
-                                </div>
-                                <div class="action-btns">
-                                    <button class="btn btn-sm btn-outline-secondary" onclick="openEditModal('${rule.id}', '${escapeHtml(rule.tu_khoa.replace(/'/g, "\\'"))}', '${escapeHtml(rule.dinh_nghia_sql_logic.replace(/'/g, "\\'").replace(/\n/g, '\\n'))}')" title="Sửa">
-                                        <i class="fa-solid fa-pen"></i>
-                                    </button>
-                                    <button class="btn btn-sm btn-outline-danger" onclick="deleteRule('${rule.id}')" title="Xoá">
-                                        <i class="fa-solid fa-trash"></i>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="mt-2">
-                                <div class="rule-logic">${escapeHtml(rule.dinh_nghia_sql_logic)}</div>
-                            </div>
-                            <div class="rule-meta">
-                                Cập nhật: ${rule.updated_at || 'N/A'} | ID: ${rule.id}
-                            </div>
-                        </div>
-                    `;
-                    container.insertAdjacentHTML('beforeend', html);
-                });
+                renderRules(data);
             } catch (error) {
                 loader.classList.add('d-none');
                 showToast("Lỗi khi tải dữ liệu: " + error.message, 'error');
+            }
+        }
+
+        // Tìm kiếm luật bằng vector search
+        async function searchRules() {
+            const query = document.getElementById('search-input').value.trim();
+            if (!query) {
+                loadRules();
+                return;
+            }
+
+            const loader = document.getElementById('rules-loading');
+            const container = document.getElementById('rules-container');
+            const emptyMsg = document.getElementById('rules-empty');
+            const clearBtn = document.getElementById('clear-search-btn');
+
+            container.innerHTML = '';
+            loader.classList.remove('d-none');
+            emptyMsg.classList.add('d-none');
+            clearBtn.classList.remove('d-none');
+
+            try {
+                const response = await fetch(`${API_URL}/search?q=${encodeURIComponent(query)}`);
+                if (!response.ok) throw new Error("Lỗi khi tìm kiếm");
+                
+                const data = await response.json();
+                renderRules(data);
+            } catch (error) {
+                loader.classList.add('d-none');
+                showToast("Lỗi tìm kiếm: " + error.message, 'error');
+            }
+        }
+
+        function clearSearch() {
+            loadRules();
+        }
+
+        // Render dữ liệu vào giao diện
+        function renderRules(data) {
+            const container = document.getElementById('rules-container');
+            const loader = document.getElementById('rules-loading');
+            const emptyMsg = document.getElementById('rules-empty');
+
+            loader.classList.add('d-none');
+            
+            if (data.length === 0) {
+                emptyMsg.classList.remove('d-none');
+                return;
+            }
+
+            data.forEach(rule => {
+                const html = `
+                    <div class="rule-item" id="rule-${rule.id}">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <div class="rule-keyword"><i class="fa-solid fa-tag text-primary me-2"></i>${escapeHtml(rule.tu_khoa)}</div>
+                            </div>
+                            <div class="action-btns">
+                                <button class="btn btn-sm btn-outline-secondary" onclick="openEditModal('${rule.id}', '${escapeHtml(rule.tu_khoa.replace(/'/g, "\\'"))}', '${escapeHtml(rule.dinh_nghia_sql_logic.replace(/'/g, "\\'").replace(/\n/g, '\\n'))}')" title="Sửa">
+                                    <i class="fa-solid fa-pen"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger" onclick="deleteRule('${rule.id}')" title="Xoá">
+                                    <i class="fa-solid fa-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="mt-2">
+                            <div class="rule-logic">${escapeHtml(rule.dinh_nghia_sql_logic)}</div>
+                        </div>
+                        <div class="rule-meta">
+                            Cập nhật: ${formatDate(rule.updated_at)} | ID: ${rule.id}
+                        </div>
+                    </div>
+                `;
+                container.insertAdjacentHTML('beforeend', html);
+            });
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return 'N/A';
+            try {
+                const d = new Date(dateStr);
+                return d.toLocaleString('vi-VN');
+            } catch (e) {
+                return dateStr;
             }
         }
 

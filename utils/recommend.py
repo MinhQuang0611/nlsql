@@ -42,6 +42,9 @@ Câu hỏi vừa hỏi: {user_query}
 Câu trả lời vừa nhận: {answer}
 
 Hãy đề xuất {num_recommend} câu hỏi tiếp theo mà người dùng nên hỏi.
+
+Lưu ý: Thông tin chỉ trong phạm vi hỏi đáp với cơ sở dữ liệu về quản lý đào tạo, sinh viên, ngành học, liên quan đến học viện, không liên quan đến các vấn đề khác và đây là . Không trả lời các câu hỏi không liên quan đến cơ sở dữ liệu.
+
 """
 
 

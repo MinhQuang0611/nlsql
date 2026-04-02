@@ -5,6 +5,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from config import get_settings
 from graph.state import AgentState, TableSchema
 from prompts.sql_plan import SQL_PLAN_SYSTEM, SQL_PLAN_HUMAN
+from agents.intent_agent import _format_history
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -94,20 +95,17 @@ async def sql_plan_agent(state: AgentState) -> AgentState:
         HumanMessage(content=SQL_PLAN_HUMAN.format(
             user_query=user_query,
             schema_context=schema_str,
-            business_context=business_str
+            business_context=business_str,
+            history_text=history_text
         )),
     ]
 
-<<<<<<< HEAD
-    logger.info("[SQLPlanAgent] Generating reasoning plan for query=%r...", user_query)
-    # response = await _llm.ainvoke(messages)
-    query_plan = ""
-    # query_plan = response.content.strip()
-=======
     logger.info("[SQLPlanAgent] Generating reasoning plan for query=%r, history_len=%d...", user_query, len(history))
-    response = await _llm.ainvoke(messages)
-    query_plan = response.content.strip()
->>>>>>> 8b8ad016f (pull)
+    # response = await _llm.ainvoke(messages)
+    # query_plan = response.content.strip()
+    query_plan = """
+    
+    """
 
     logger.info("[SQLPlanAgent] Generated Plan:\n%s", query_plan)
 

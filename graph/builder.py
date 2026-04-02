@@ -33,17 +33,22 @@ def route_after_knowledge(state: AgentState) -> str:
     """
     - knowledge_query: Knowledge Agent đã sinh answer → kết thúc ngay
     - domain_query:    chỉ lưu context → tiếp tục DB pipeline (schema → sql_plan ...)
+    - data_query/chart_request: chạy qua schema rồi tới knowledge, nên sau knowledge là sql_plan
     """
     intent = state.get("intent")
     if intent == "knowledge_query":
         return "answer"
-    return "schema"   # domain_query
+    if intent == "domain_query":
+        return "schema"
+    return "sql_plan"
 
 
 def route_after_schema(state: AgentState) -> str:
     intent = state.get("intent")
     if intent == "schema_question":
         return "answer"
+    if intent == "domain_query":
+        return "sql_plan"
     return "knowledge"
 
 
@@ -60,7 +65,7 @@ def route_after_sql_check(state: AgentState) -> str:
     return "sql_gen"
 
 
-def build_graph() -> Any:
+def build_graph(checkpointer: Any = None) -> Any:
 
     def inc_retry(state: AgentState) -> dict:
         return {"retry_count": state.get("retry_count", 0) + 1}
@@ -71,7 +76,6 @@ def build_graph() -> Any:
     builder.add_node("intent", intent_agent)
     builder.add_node("knowledge", knowledge_agent)   # Knowledge / Domain RAG
     builder.add_node("schema", schema_agent)
-    builder.add_node("knowledge", knowledge_agent)
     
     builder.add_node("sql_plan", sql_plan_agent)
     builder.add_node("sql_gen", sql_gen_agent)
@@ -98,26 +102,27 @@ def build_graph() -> Any:
         }
     )
 
-    # knowledge → {answer (knowledge_query) | schema (domain_query)}
+    # knowledge → {answer (knowledge_query) | schema (domain_query) | sql_plan}
     builder.add_conditional_edges(
         "knowledge",
         route_after_knowledge,
         {
             "answer": "answer",
             "schema": "schema",
+            "sql_plan": "sql_plan",
         }
     )
 
-    # schema → {sql_plan | answer (schema_question)}
+    # schema → {sql_plan | answer (schema_question) | knowledge}
     builder.add_conditional_edges(
         "schema",
         route_after_schema,
         {
             "knowledge": "knowledge",
-            "answer": "answer"
+            "answer": "answer",
+            "sql_plan": "sql_plan",
         }
     )
-    builder.add_edge("knowledge", "sql_plan")
     builder.add_edge("sql_plan", "sql_gen")
     builder.add_edge("sql_gen", "sql_check")
 
@@ -136,5 +141,5 @@ def build_graph() -> Any:
     builder.add_edge("answer", END)
     builder.add_edge("clarification", END)
 
-    app = builder.compile()
+    app = builder.compile(checkpointer=checkpointer)
     return app

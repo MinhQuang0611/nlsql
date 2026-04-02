@@ -5,7 +5,7 @@ import { Logo } from '@/components/Logo';
 import dynamic from 'next/dynamic';
 import SiderLayout from '@/components/layouts/SiderLayout';
 // Dynamically import ChatChartAnswer to avoid SSR issues with ESM vega-lite/vega-embed
-const ChatChartAnswer = dynamic(() => import('@/components/chart/ChatChartAnswer'), { ssr: false });
+import ChatChartAnswer from '@/components/chart/ChatChartAnswer';
 import SendOutlined from '@ant-design/icons/SendOutlined';
 import PlusOutlined from '@ant-design/icons/PlusOutlined';
 

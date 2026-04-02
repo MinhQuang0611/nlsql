@@ -48,3 +48,4 @@ README.md
 Makefile
 
 text2sql_chatbot/
+postgres_data/

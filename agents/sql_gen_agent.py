@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 _llm = ChatOpenAI(
-    model=settings.openai_model,
+    model=settings.sql_gen_model,
     temperature=0,
     api_key=settings.openai_api_key,
 )

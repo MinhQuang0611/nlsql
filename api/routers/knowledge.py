@@ -1,247 +1,156 @@
-"""
-api/routers/knowledge.py
-
-Các endpoint quản lý Knowledge Base:
-
-POST /api/v1/knowledge/sync       — Sync toàn bộ từ Google Sheet vào Qdrant
-POST /api/v1/knowledge/add        — Thêm 1 entry thủ công
-GET  /api/v1/knowledge/list       — Xem danh sách entries (có filter + pagination)
-DELETE /api/v1/knowledge/{id}     — Xoá 1 entry theo ID
-"""
-
-from __future__ import annotations
-
 import logging
-import asyncio
-from datetime import datetime, timezone
-from typing import Optional
-
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
-from pydantic import BaseModel, Field
-from langchain_openai import OpenAIEmbeddings
+from fastapi import APIRouter, HTTPException, Path
+from sqlalchemy.future import select
 from qdrant_client import QdrantClient
-from qdrant_client.http.models import Distance, VectorParams, PointStruct, Filter
+from qdrant_client.http.models import Distance, VectorParams, PointStruct
+from langchain_openai import OpenAIEmbeddings
 
+from api.models.business_rule import BusinessRule
+from api.schemas.business_rule import BusinessRuleCreate, BusinessRuleUpdate, BusinessRuleResponse
+from db.connection import get_internal_db_context
 from config import get_settings
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-router = APIRouter(prefix="/knowledge", tags=["Knowledge Base"])
+router = APIRouter(tags=["Knowledge"])
 
 COLLECTION_NAME = "knowledge_collection"
-VECTOR_SIZE = 1536
 
-
-# ── Pydantic schemas ──────────────────────────────────────────────────────────
-
-class KnowledgeAddRequest(BaseModel):
-    title: str = Field(..., description="Tiêu đề / chủ đề của mục kiến thức")
-    content: str = Field(..., description="Nội dung kiến thức chi tiết")
-    source: str = Field(default="manual", description="Nguồn gốc (tên tài liệu, bộ phận...)")
-
-
-class KnowledgeEntry(BaseModel):
-    id: int
-    title: str
-    content: str
-    source: str
-    synced_at: Optional[str] = None
-
-
-class SyncResponse(BaseModel):
-    status: str
-    indexed: int
-    message: str
-
-
-class AddResponse(BaseModel):
-    status: str
-    id: int
-    message: str
-
-
-class ListResponse(BaseModel):
-    total: int
-    items: list[KnowledgeEntry]
-
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _get_qdrant() -> QdrantClient:
+def get_qdrant_client():
     return QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
 
-
-def _get_embeddings() -> OpenAIEmbeddings:
+def get_embeddings():
     return OpenAIEmbeddings(
         model=settings.embedding_model,
-        api_key=settings.openai_api_key,
+        api_key=settings.openai_api_key
     )
 
-
-def _ensure_collection(qdrant: QdrantClient) -> None:
-    existing = [c.name for c in qdrant.get_collections().collections]
-    if COLLECTION_NAME not in existing:
-        qdrant.create_collection(
-            collection_name=COLLECTION_NAME,
-            vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
-        )
-        logger.info("[Knowledge] Đã tạo collection '%s'.", COLLECTION_NAME)
-
-
-def _next_id(qdrant: QdrantClient) -> int:
-    """Lấy ID tiếp theo bằng cách lấy count hiện tại + offset an toàn."""
+def ensure_collection(qdrant: QdrantClient):
     try:
-        info = qdrant.get_collection(COLLECTION_NAME)
-        return (info.points_count or 0) + 10_000  # offset tránh trùng với sheet rows
-    except Exception:
-        return 10_001
-
-
-# ── Endpoints ─────────────────────────────────────────────────────────────────
-
-@router.post("/sync", response_model=SyncResponse)
-async def sync_from_sheet(background_tasks: BackgroundTasks, force: bool = Query(default=False, description="Xoá và rebuild hoàn toàn")) -> SyncResponse:
-    """
-    Đồng bộ toàn bộ kiến thức từ Google Sheet vào Qdrant.
-    Thao tác chạy **sync** (blocking) để trả về kết quả ngay.
-    Dùng `force=true` để xoá collection cũ và index lại sạch từ đầu.
-    """
-    try:
-        # Import và chạy trong thread (tránh block event loop vì gspread + embed)
-        from scripts.index_knowledge import run as _run
-        indexed = await asyncio.to_thread(_run, force)
-        return SyncResponse(
-            status="ok",
-            indexed=indexed,
-            message=f"Đã đồng bộ {indexed} mục kiến thức từ Google Sheet.",
-        )
-    except Exception as exc:
-        logger.error("[Knowledge/sync] Lỗi: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-@router.post("/add", response_model=AddResponse)
-async def add_knowledge(body: KnowledgeAddRequest) -> AddResponse:
-    """
-    Thêm thủ công 1 mục kiến thức vào collection.
-    Entry này sẽ được merge cùng với dữ liệu từ Sheet (không bị overwrite khi sync).
-    """
-    try:
-        qdrant = _get_qdrant()
-        embeddings = _get_embeddings()
-        _ensure_collection(qdrant)
-
-        embed_text = f"{body.title}\n{body.content}".strip()
-        vector = await asyncio.to_thread(embeddings.embed_query, embed_text)
-
-        new_id = _next_id(qdrant)
-        now_iso = datetime.now(timezone.utc).isoformat()
-
-        point = PointStruct(
-            id=new_id,
-            vector=vector,
-            payload={
-                "title": body.title,
-                "content": body.content,
-                "source": body.source,
-                "embed_text": embed_text,
-                "synced_at": now_iso,
-            },
-        )
-
-        await asyncio.to_thread(qdrant.upsert, collection_name=COLLECTION_NAME, points=[point])
-        logger.info("[Knowledge/add] Thêm entry id=%d: %r", new_id, body.title)
-
-        return AddResponse(
-            status="ok",
-            id=new_id,
-            message=f"Đã thêm mục kiến thức '{body.title}' (id={new_id}).",
-        )
-    except Exception as exc:
-        logger.error("[Knowledge/add] Lỗi: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-@router.get("/list", response_model=ListResponse)
-async def list_knowledge(
-    offset: int = Query(default=0, ge=0),
-    limit: int = Query(default=20, ge=1, le=100),
-    search: Optional[str] = Query(default=None, description="Tìm kiếm theo tiêu đề/nội dung (semantic)"),
-) -> ListResponse:
-    """
-    Liệt kê các mục kiến thức trong collection.
-    Nếu truyền `search`, sẽ tìm kiếm semantic và trả về kết quả theo score.
-    """
-    try:
-        qdrant = _get_qdrant()
-        _ensure_collection(qdrant)
-
-        if search:
-            embeddings = _get_embeddings()
-            vector = await asyncio.to_thread(embeddings.embed_query, search)
-            results = qdrant.query_points(
+        collections = qdrant.get_collections().collections
+        if not any(c.name == COLLECTION_NAME for c in collections):
+            logger.info(f"Creating Qdrant collection: {COLLECTION_NAME}")
+            qdrant.create_collection(
                 collection_name=COLLECTION_NAME,
-                query=vector,
-                limit=limit,
-                with_payload=True,
-            ).points
+                vectors_config=VectorParams(size=1536, distance=Distance.COSINE),
+            )
+    except Exception as e:
+        logger.error(f"Failed to ensure Qdrant collection: {e}")
 
-            items = []
-            for hit in results:
-                p = hit.payload or {}
-                items.append(KnowledgeEntry(
-                    id=hit.id if isinstance(hit.id, int) else 0,
-                    title=p.get("title", ""),
-                    content=p.get("content", ""),
-                    source=p.get("source", ""),
-                    synced_at=p.get("synced_at"),
-                ))
-            return ListResponse(total=len(items), items=items)
+@router.on_event("startup")
+async def startup_event():
+    qdrant = get_qdrant_client()
+    ensure_collection(qdrant)
 
-        # Scroll (không search)
-        scroll_result = qdrant.scroll(
-            collection_name=COLLECTION_NAME,
-            offset=offset,
-            limit=limit,
-            with_payload=True,
-            with_vectors=False,
+@router.get("/knowledge", response_model=list[BusinessRuleResponse])
+async def list_knowledge_rules():
+    async with get_internal_db_context() as db:
+        result = await db.execute(select(BusinessRule))
+        rules = result.scalars().all()
+        return rules
+
+@router.post("/knowledge", response_model=BusinessRuleResponse)
+async def create_knowledge_rule(rule_in: BusinessRuleCreate):
+    async with get_internal_db_context() as db:
+        # Check if tu_khoa exists
+        result = await db.execute(select(BusinessRule).where(BusinessRule.tu_khoa == rule_in.tu_khoa))
+        if result.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Quy định với từ khóa này đã tồn tại.")
+
+        new_rule = BusinessRule(
+            tu_khoa=rule_in.tu_khoa,
+            dinh_nghia_sql_logic=rule_in.dinh_nghia_sql_logic
         )
-        points, _ = scroll_result
-        items = []
-        for pt in points:
-            p = pt.payload or {}
-            items.append(KnowledgeEntry(
-                id=pt.id if isinstance(pt.id, int) else 0,
-                title=p.get("title", ""),
-                content=p.get("content", ""),
-                source=p.get("source", ""),
-                synced_at=p.get("synced_at"),
-            ))
+        db.add(new_rule)
+        await db.commit()
+        await db.refresh(new_rule)
 
-        total_info = qdrant.get_collection(COLLECTION_NAME)
-        total = total_info.points_count or len(items)
+        # Upsert to Qdrant
+        try:
+            qdrant = get_qdrant_client()
+            ensure_collection(qdrant)
+            embeddings = get_embeddings()
+            
+            # Khác schema_agent, ở đây ta sẽ dùng embed tu_khoa nhưng cũng có thể nối thêm chút định nghĩa
+            embed_text = f"Nghiệp vụ: {new_rule.tu_khoa}. Định nghĩa: {new_rule.dinh_nghia_sql_logic}"
+            vector = embeddings.embed_query(embed_text)
 
-        return ListResponse(total=total, items=items)
+            point = PointStruct(
+                id=new_rule.id,
+                vector=vector,
+                payload={
+                    "tu_khoa": new_rule.tu_khoa,
+                    "dinh_nghia_sql_logic": new_rule.dinh_nghia_sql_logic
+                }
+            )
+            qdrant.upsert(collection_name=COLLECTION_NAME, points=[point])
+            logger.info(f"Upserted rule {new_rule.id} to Qdrant")
+        except Exception as e:
+            logger.error(f"Failed to upsert to Qdrant: {e}")
+            # Consider returning a specific warning if DB succeeds but Qdrant fails
 
-    except Exception as exc:
-        logger.error("[Knowledge/list] Lỗi: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc))
+        return new_rule
 
+@router.put("/knowledge/{rule_id}", response_model=BusinessRuleResponse)
+async def update_knowledge_rule(rule_in: BusinessRuleUpdate, rule_id: str = Path(...)):
+    async with get_internal_db_context() as db:
+        result = await db.execute(select(BusinessRule).where(BusinessRule.id == rule_id))
+        rule = result.scalar_one_or_none()
+        
+        if not rule:
+            raise HTTPException(status_code=404, detail="Không tìm thấy quy định này.")
 
-@router.delete("/{entry_id}", response_model=dict)
-async def delete_knowledge(entry_id: int) -> dict:
-    """Xoá 1 mục kiến thức theo ID."""
-    try:
-        qdrant = _get_qdrant()
-        _ensure_collection(qdrant)
-        from qdrant_client.http.models import PointIdsList
-        qdrant.delete(
-            collection_name=COLLECTION_NAME,
-            points_selector=PointIdsList(points=[entry_id]),
-        )
-        logger.info("[Knowledge/delete] Đã xoá entry id=%d", entry_id)
-        return {"status": "ok", "message": f"Đã xoá mục id={entry_id}."}
-    except Exception as exc:
-        logger.error("[Knowledge/delete] Lỗi: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc))
+        if rule_in.tu_khoa is not None:
+            rule.tu_khoa = rule_in.tu_khoa
+        if rule_in.dinh_nghia_sql_logic is not None:
+            rule.dinh_nghia_sql_logic = rule_in.dinh_nghia_sql_logic
+            
+        await db.commit()
+        await db.refresh(rule)
+
+        # Upsert to Qdrant
+        try:
+            qdrant = get_qdrant_client()
+            ensure_collection(qdrant)
+            embeddings = get_embeddings()
+            
+            embed_text = f"Nghiệp vụ: {rule.tu_khoa}. Định nghĩa: {rule.dinh_nghia_sql_logic}"
+            vector = embeddings.embed_query(embed_text)
+
+            point = PointStruct(
+                id=rule.id,
+                vector=vector,
+                payload={
+                    "tu_khoa": rule.tu_khoa,
+                    "dinh_nghia_sql_logic": rule.dinh_nghia_sql_logic
+                }
+            )
+            qdrant.upsert(collection_name=COLLECTION_NAME, points=[point])
+            logger.info(f"Updated rule {rule.id} in Qdrant")
+        except Exception as e:
+            logger.error(f"Failed to update to Qdrant: {e}")
+
+        return rule
+
+@router.delete("/knowledge/{rule_id}")
+async def delete_knowledge_rule(rule_id: str = Path(...)):
+    async with get_internal_db_context() as db:
+        result = await db.execute(select(BusinessRule).where(BusinessRule.id == rule_id))
+        rule = result.scalar_one_or_none()
+        
+        if not rule:
+            raise HTTPException(status_code=404, detail="Không tìm thấy quy định này.")
+
+        await db.delete(rule)
+        await db.commit()
+        
+        # Delete from Qdrant
+        try:
+            qdrant = get_qdrant_client()
+            qdrant.delete(collection_name=COLLECTION_NAME, points_selector=[rule_id])
+            logger.info(f"Deleted rule {rule_id} from Qdrant")
+        except Exception as e:
+            logger.error(f"Failed to delete from Qdrant: {e}")
+
+        return {"message": "Đã xóa quy định thành công."}

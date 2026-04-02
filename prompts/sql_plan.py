@@ -24,6 +24,9 @@ SQL_PLAN_HUMAN = """### LỊCH SỬ HỘI THOẠI (nếu có) ###
 ### DATABASE SCHEMA ###
 {schema_context}
 
+### QUY ĐỊNH NGHIỆP VỤ (BUSINESS RULES) ###
+{business_context}
+
 ### YÊU CẦU ###
-Hãy phân tích và tạo kế hoạch SQL reasoning chi tiết để trả lời câu hỏi trên.
+Hãy phân tích và tạo kế hoạch SQL reasoning chi tiết để trả lời câu hỏi trên. Hãy chắc chắn sử dụng QUY ĐỊNH NGHIỆP VỤ (nếu có) để đặt logic cho các mệnh đề WHERE, HAVING.
 """

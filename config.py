@@ -24,6 +24,14 @@ class Settings(BaseSettings):
     ch_db_user: str = "default"
     ch_db_password: str = ""
 
+    # Internal Backend DB
+    postgres_host: str = "localhost"
+    postgres_port: int = 5432
+    postgres_db: str = "postgres"
+    postgres_user: str = "postgres"
+    postgres_password: str = "postgres"
+
+
     @property
     def db_host(self) -> str:
         return self.pg_db_host if self.active_db == "postgres" else self.ch_db_host
@@ -98,6 +106,15 @@ class Settings(BaseSettings):
                 f"@{self.db_host}:{self.db_port}/{self.db_name}"
                 f"?ssl=disable"
             )
+
+    @property
+    def internal_database_url(self) -> str:
+        from urllib.parse import quote_plus
+        return (
+            f"postgresql+asyncpg://{self.postgres_user}:{quote_plus(self.postgres_password)}"
+            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+            f"?ssl=disable"
+        )
 
     @property
     def database_url_sync(self) -> str:

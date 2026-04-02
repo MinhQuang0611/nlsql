@@ -102,3 +102,5 @@ wren-ui/*.log
 wren-ui/.vercel
 wren-ui/coverage/
 wren-ui/.turbo
+
+postgres_data/

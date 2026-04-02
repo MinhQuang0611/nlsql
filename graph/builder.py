@@ -5,6 +5,7 @@ from langgraph.graph import StateGraph, START, END
 from graph.state import AgentState
 from agents.intent_agent import intent_agent
 from agents.schema_agent import schema_agent
+from agents.knowledge_agent import knowledge_agent
 from agents.sql_plan_agent import sql_plan_agent
 from agents.sql_gen_agent import sql_gen_agent
 from agents.sql_check_agent import sql_check_agent
@@ -12,7 +13,7 @@ from agents.executor_agent import executor_agent
 from agents.chart_agent import chart_agent
 from agents.answer_agent import answer_agent
 from agents.clarification_agent import clarification_agent
-from agents.knowledge_agent import knowledge_agent
+
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ def route_after_schema(state: AgentState) -> str:
     intent = state.get("intent")
     if intent == "schema_question":
         return "answer"
-    return "sql_plan"
+    return "knowledge"
 
 
 def route_after_sql_check(state: AgentState) -> str:
@@ -70,7 +71,8 @@ def build_graph() -> Any:
     builder.add_node("intent", intent_agent)
     builder.add_node("knowledge", knowledge_agent)   # Knowledge / Domain RAG
     builder.add_node("schema", schema_agent)
-
+    builder.add_node("knowledge", knowledge_agent)
+    
     builder.add_node("sql_plan", sql_plan_agent)
     builder.add_node("sql_gen", sql_gen_agent)
     builder.add_node("sql_check", sql_check_agent)
@@ -111,11 +113,11 @@ def build_graph() -> Any:
         "schema",
         route_after_schema,
         {
-            "sql_plan": "sql_plan",
-            "answer": "answer",
+            "knowledge": "knowledge",
+            "answer": "answer"
         }
     )
-
+    builder.add_edge("knowledge", "sql_plan")
     builder.add_edge("sql_plan", "sql_gen")
     builder.add_edge("sql_gen", "sql_check")
 

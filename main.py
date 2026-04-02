@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from config import get_settings
-from db.connection import check_db_connection, close_db, init_db
+from db.connection import check_db_connection, close_db, init_db, init_internal_db
 from api.routers.chat import router as chat_router
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -43,6 +43,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     if settings.app_env == "development":
         await init_db()
+        await init_internal_db()
 
     logger.info("Checking/indexing schema...")
     await index_schema_main()

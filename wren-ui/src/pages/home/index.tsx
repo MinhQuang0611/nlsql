@@ -97,6 +97,18 @@ const CustomTextArea = styled(Input.TextArea)`
   font-size: 15px;
 `;
 
+const SuggestedQuestionButton = styled(Button)`
+  border: 1px solid var(--gray-4);
+  font-size: 12px;
+  transition: transform 0.2s ease, border-color 0.2s ease;
+
+  &:hover,
+  &:focus {
+    border: 1px solid var(--red-5) !important;
+    transform: translateY(-5px);
+  }
+`;
+
 const SqlBlock = styled.pre`
   background: #f8f9fa;
   border: 1px solid #e9ecef;
@@ -137,6 +149,13 @@ const saveSessions = (sessions: any) => {
 };
 
 export default function Home() {
+  const suggestedQuestions = [
+    'Tổng số lượng sinh viên hiện tại?',
+    'Thống kê sinh viên theo từng ngành học',
+    'Danh sách sinh viên đang học',
+    'Top 5 ngành học có đông sinh viên nhất'
+  ];
+
   const [sessions, setSessions] = useState<any>({});
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [draftMessages, setDraftMessages] = useState<any[]>([]);
@@ -307,9 +326,22 @@ export default function Home() {
       <MainContent>
         <ChatWindow>
           {chatHistory.length === 0 && (
-            <div className="d-flex align-center justify-center flex-column" style={{ height: '100%', opacity: 0.6, marginTop: '10vh' }}>
+            <div className="d-flex align-center justify-center flex-column" style={{ height: '100%', marginTop: '10vh' }}>
               <Logo size={80} color="var(--gray-3)" />
-              <Title level={3} className="mt-6">How can I help you today?</Title>
+              <Title level={3} className="mt-6">Xin chào! Tôi có thể giúp gì cho bạn</Title>
+              <Space wrap size="small" style={{ marginTop: 12, justifyContent: 'center' }}>
+                {suggestedQuestions.map((question) => (
+                  <SuggestedQuestionButton
+                    key={question}
+                    size="small"
+                    shape="round"
+                    disabled={loading}
+                    onClick={() => sendMessage(question)}
+                  >
+                    {question}
+                  </SuggestedQuestionButton>
+                ))}
+              </Space>
             </div>
           )}
 

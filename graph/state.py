@@ -58,6 +58,7 @@ class AgentState(TypedDict, total=False):
     relevant_tables: list[str]      
     schema_context: list[TableSchema]  
     pruned_schema_context: list[TableSchema] 
+    business_context: list[dict]
     
     query_plan: str
 

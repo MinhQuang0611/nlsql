@@ -108,6 +108,39 @@ settings = get_settings()
 class Base(DeclarativeBase):
     pass
 
+# ---------------------------------------------------------------------------
+# Internal Backend Database (PostgreSQL) - Always used for Business Rules CRUD
+# ---------------------------------------------------------------------------
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+
+internal_engine = create_async_engine(
+    settings.internal_database_url,
+    pool_size=settings.db_pool_size,
+    pool_timeout=settings.db_pool_timeout,
+    pool_pre_ping=True,
+    echo=settings.db_echo,
+)
+
+InternalAsyncSessionLocal = async_sessionmaker(
+    bind=internal_engine,
+    expire_on_commit=False,
+    autoflush=False,
+)
+
+@asynccontextmanager
+async def get_internal_db_context() -> AsyncGenerator[AsyncSession, None]:
+    async with InternalAsyncSessionLocal() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+
+async def init_internal_db() -> None:
+    async with internal_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("Khởi tạo schema Internal Postgres thành công")
 
 # ---------------------------------------------------------------------------
 # Khởi tạo engine theo active_db
@@ -256,8 +289,10 @@ async def init_db() -> None:
         return
 
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("Khởi tạo schema Postgres thành công")
+        # Prevent ClickHouse Base from being created on external Postgres
+        pass
+    logger.info("Khởi tạo schema External Postgres thành công")
+
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +300,9 @@ async def init_db() -> None:
 # ---------------------------------------------------------------------------
 
 async def close_db() -> None:
+    await internal_engine.dispose()
+    logger.info("Đã đóng kết nối Internal Postgres")
+
     if settings.active_db == "clickhouse":
         _sync_engine.dispose()
         logger.info("Đã đóng kết nối ClickHouse")

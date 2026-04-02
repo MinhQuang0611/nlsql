@@ -60,15 +60,14 @@ def _format_schema_context(schemas: list[TableSchema]) -> str:
     return "\n\n".join(parts)
 
 
-def _format_history(history: list[dict]) -> str:
-    """Chuyển list history thành chuỗi dễ đọc cho LLM."""
-    if not history:
-        return "(Không có lịch sử hội thoại)"
-    lines = []
-    for msg in history:
-        role = "Người dùng" if msg.get("role") == "user" else "Trợ lý"
-        lines.append(f"{role}: {msg.get('content', '')}")
-    return "\n".join(lines)
+def _format_business_context(b_ctx: list[dict]) -> str:
+    if not b_ctx:
+        return "Không có quy định nghiệp vụ nào liên quan."
+        
+    parts = []
+    for c in b_ctx:
+        parts.append(f"- Từ khóa: {c['tu_khoa']}\n  Định nghĩa (Logic): {c['dinh_nghia_sql_logic']}")
+    return "\n".join(parts)
 
 
 async def sql_plan_agent(state: AgentState) -> AgentState:
@@ -87,13 +86,15 @@ async def sql_plan_agent(state: AgentState) -> AgentState:
         return {**state, "query_plan": "No schema information provided."}
 
     schema_str = _format_schema_context(schema_context)
+    business_ctx = state.get("business_context", [])
+    business_str = _format_business_context(business_ctx)
 
     messages = [
         SystemMessage(content=SQL_PLAN_SYSTEM),
         HumanMessage(content=SQL_PLAN_HUMAN.format(
             user_query=user_query,
             schema_context=schema_str,
-            history_text=history_text,
+            business_context=business_str
         )),
     ]
 

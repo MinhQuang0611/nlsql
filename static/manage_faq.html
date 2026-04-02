@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quản lý FAQ - NLSQL</title>
+    <!-- Thêm Bootstrap 5 để có giao diện đẹp và responsive -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Thêm Font Awesome cho các icon -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    
+    <style>
+        :root {
+            --primary-bg: #f0f2f5;
+            --header-bg: #1a2a3a;
+            --card-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            --accent-color: #007bff;
+        }
+        body {
+            background-color: var(--primary-bg);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            padding-bottom: 50px;
+        }
+        .header {
+            background-color: var(--header-bg);
+            color: white;
+            padding: 30px 0;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+            background: linear-gradient(135deg, #1a2a3a 0%, #2c3e50 100%);
+        }
+        .nav-link {
+            font-weight: 500;
+            color: #555;
+            border-radius: 8px !important;
+            margin-right: 10px;
+            padding: 10px 20px !important;
+        }
+        .nav-link.active {
+            background-color: var(--accent-color) !important;
+            color: white !important;
+            border: none !important;
+        }
+        .card {
+            box-shadow: var(--card-shadow);
+            border: none;
+            border-radius: 12px;
+            margin-bottom: 25px;
+            overflow: hidden;
+        }
+        .card-header {
+            background-color: white;
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+            padding: 15px 20px;
+            font-weight: 700;
+            color: #333;
+        }
+        .faq-item {
+            background-color: white;
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+            border-left: 5px solid #007bff;
+            transition: all 0.3s ease;
+        }
+        .faq-item:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 15px rgba(0,0,0,0.08);
+        }
+        .faq-question {
+            font-size: 1.15rem;
+            font-weight: 700;
+            color: #1a2a3a;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+        }
+        .faq-answer {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 10px;
+            font-size: 1rem;
+            color: #444;
+            line-height: 1.6;
+            border: 1px solid #edf2f7;
+        }
+        .faq-meta {
+            font-size: 0.85rem;
+            color: #8898aa;
+            margin-top: 15px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .btn-action {
+            width: 36px;
+            height: 36px;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+        #toast-container {
+            position: fixed;
+            top: 25px;
+            right: 25px;
+            z-index: 2000;
+        }
+        .search-area {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: var(--card-shadow);
+            margin-bottom: 25px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header text-center">
+        <div class="container">
+            <h2 class="mb-2"><i class="fa-solid fa-circle-question me-2"></i> Hệ thống Quản lý FAQ</h2>
+            <p class="mb-0 opacity-75">Quản lý các câu hỏi thường gặp để tối ưu tốc độ trả lời Chatbot</p>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast-container"></div>
+
+    <div class="container">
+        <!-- Navigation & Search -->
+        <div class="row mb-4">
+            <div class="col-md-7">
+                <ul class="nav nav-pills" id="faqTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="list-tab" data-bs-toggle="tab" data-bs-target="#list-pane" type="button" role="tab"><i class="fa-solid fa-layer-group me-2"></i>Danh sách FAQ</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="add-tab" data-bs-toggle="tab" data-bs-target="#add-pane" type="button" role="tab"><i class="fa-solid fa-plus-circle me-2"></i>Thêm FAQ mới</button>
+                    </li>
+                </ul>
+            </div>
+            <div class="col-md-5">
+                <div class="input-group">
+                    <span class="input-group-text bg-white border-end-0"><i class="fa-solid fa-magnifying-glass text-muted"></i></span>
+                    <input type="text" id="search-input" class="form-control border-start-0" placeholder="Tìm kiếm FAQ theo nội dung...">
+                    <button class="btn btn-primary px-4" type="button" onclick="searchFAQ()">Tìm kiếm</button>
+                    <button class="btn btn-outline-secondary d-none" id="clear-search-btn" onclick="clearSearch()"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tab Contents -->
+        <div class="tab-content" id="faqTabsContent">
+            
+            <!-- TAB 1: DANH SÁCH FAQ -->
+            <div class="tab-pane fade show active" id="list-pane" role="tabpanel">
+                <div id="faq-loading" class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <p class="mt-2 text-muted">Đang tải dữ liệu FAQ...</p>
+                </div>
+                <div id="faq-empty" class="alert alert-light text-center py-5 d-none">
+                    <i class="fa-solid fa-ghost fa-3x mb-3 text-muted"></i>
+                    <h5>Chưa có dữ liệu FAQ nào</h5>
+                    <p class="text-muted">Hãy bắt đầu bằng cách thêm câu hỏi thường gặp đầu tiên.</p>
+                </div>
+                <div id="faq-container">
+                    <!-- FAQ items will be appended here -->
+                </div>
+            </div>
+
+            <!-- TAB 2: THÊM MỚI -->
+            <div class="tab-pane fade" id="add-pane" role="tabpanel">
+                <div class="card">
+                    <div class="card-header bg-white">
+                        <i class="fa-solid fa-pen-to-square me-2"></i> Tạo câu hỏi thường gặp mới
+                    </div>
+                    <div class="card-body p-4">
+                        <form id="add-faq-form">
+                            <div class="mb-4">
+                                <label for="cau_hoi" class="form-label fw-bold">Câu hỏi của người dùng</label>
+                                <input type="text" class="form-control form-control-lg" id="cau_hoi" placeholder="Nhập câu trả lời mà người dùng thường hỏi..." required>
+                                <div class="form-text">Ví dụ: Cách tính điểm trung bình học kỳ như thế nào?</div>
+                            </div>
+                            <div class="mb-4">
+                                <label for="cau_tra_loi" class="form-label fw-bold">Nội dung trả lời</label>
+                                <textarea class="form-control" id="cau_tra_loi" rows="8" placeholder="Nhập câu trả lời chi tiết và chính xác..." required></textarea>
+                            </div>
+                            <div class="d-grid">
+                                <button type="submit" class="btn btn-primary btn-lg">
+                                    <i class="fa-solid fa-cloud-arrow-up me-2"></i> Lưu FAQ & Đồng bộ AI
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Edit Modal -->
+    <div class="modal fade" id="editModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg">
+                <div class="modal-header bg-light">
+                    <h5 class="modal-title font-weight-bold"><i class="fa-solid fa-edit me-2"></i>Chỉnh sửa FAQ</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <form id="edit-faq-form">
+                        <input type="hidden" id="edit_faq_id">
+                        <div class="mb-4">
+                            <label for="edit_cau_hoi" class="form-label fw-bold">Câu hỏi</label>
+                            <input type="text" class="form-control" id="edit_cau_hoi" required>
+                        </div>
+                        <div class="mb-4">
+                            <label for="edit_cau_tra_loi" class="form-label fw-bold">Câu trả lời</label>
+                            <textarea class="form-control" id="edit_cau_tra_loi" rows="10" required></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-link text-muted text-decoration-none" data-bs-dismiss="modal">Hủy bỏ</button>
+                    <button type="button" class="btn btn-primary px-4" onclick="saveEditFAQ()">Cập nhật thay đổi</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const API_URL = "/api/v1/faq";
+        let editModal;
+
+        document.addEventListener('DOMContentLoaded', function() {
+            editModal = new bootstrap.Modal(document.getElementById('editModal'));
+            loadFAQ();
+
+            document.getElementById('add-faq-form').addEventListener('submit', function(e) {
+                e.preventDefault();
+                createFAQ();
+            });
+
+            document.getElementById('search-input').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') searchFAQ();
+            });
+        });
+
+        function showToast(message, type = 'success') {
+            const toastContainer = document.getElementById('toast-container');
+            const bgClass = type === 'success' ? 'bg-success' : 'bg-danger';
+            const icon = type === 'success' ? 'fa-circle-check' : 'fa-circle-exclamation';
+            
+            const toastHtml = `
+                <div class="toast align-items-center text-white ${bgClass} border-0 show" role="alert">
+                    <div class="d-flex">
+                        <div class="toast-body">
+                            <i class="fa-solid ${icon} me-2"></i> ${message}
+                        </div>
+                        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+                    </div>
+                </div>
+            `;
+            
+            toastContainer.insertAdjacentHTML('beforeend', toastHtml);
+            const toastElement = toastContainer.lastElementChild;
+            setTimeout(() => {
+                toastElement.style.opacity = '0';
+                setTimeout(() => toastElement.remove(), 500);
+            }, 3000);
+        }
+
+        async function loadFAQ() {
+            const loader = document.getElementById('faq-loading');
+            const container = document.getElementById('faq-container');
+            const emptyMsg = document.getElementById('faq-empty');
+            
+            container.innerHTML = '';
+            loader.classList.remove('d-none');
+            emptyMsg.classList.add('d-none');
+            document.getElementById('clear-search-btn').classList.add('d-none');
+            document.getElementById('search-input').value = '';
+
+            try {
+                const response = await fetch(API_URL);
+                const data = await response.json();
+                renderFAQ(data);
+            } catch (error) {
+                loader.classList.add('d-none');
+                showToast("Lỗi khi tải dữ liệu: " + error.message, 'error');
+            }
+        }
+
+        async function searchFAQ() {
+            const query = document.getElementById('search-input').value.trim();
+            if (!query) { loadFAQ(); return; }
+
+            const loader = document.getElementById('faq-loading');
+            const container = document.getElementById('faq-container');
+            const emptyMsg = document.getElementById('faq-empty');
+
+            container.innerHTML = '';
+            loader.classList.remove('d-none');
+            emptyMsg.classList.add('d-none');
+            document.getElementById('clear-search-btn').classList.remove('d-none');
+
+            try {
+                const response = await fetch(`${API_URL}/search?q=${encodeURIComponent(query)}`);
+                const data = await response.json();
+                renderFAQ(data);
+            } catch (error) {
+                loader.classList.add('d-none');
+                showToast("Lỗi tìm kiếm: " + error.message, 'error');
+            }
+        }
+
+        function clearSearch() { loadFAQ(); }
+
+        function renderFAQ(data) {
+            const container = document.getElementById('faq-container');
+            const loader = document.getElementById('faq-loading');
+            const emptyMsg = document.getElementById('faq-empty');
+
+            loader.classList.add('d-none');
+            if (data.length === 0) {
+                emptyMsg.classList.remove('d-none');
+                return;
+            }
+
+            data.forEach(item => {
+                const html = `
+                    <div class="faq-item" id="faq-${item.id}">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div class="faq-question">
+                                <i class="fa-solid fa-circle-dot text-primary me-3"></i>
+                                ${escapeHtml(item.cau_hoi)}
+                            </div>
+                            <div class="d-flex">
+                                <button class="btn btn-sm btn-outline-primary btn-action me-2" onclick="editFAQ('${item.id}', \`${escapeJson(item.cau_hoi)}\`, \`${escapeJson(item.cau_tra_loi)}\`)">
+                                    <i class="fa-solid fa-pen"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger btn-action" onclick="deleteFAQ('${item.id}')">
+                                    <i class="fa-solid fa-trash-can"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="mt-3 faq-answer">
+                            ${escapeHtml(item.cau_tra_loi).replace(/\n/g, '<br>')}
+                        </div>
+                        <div class="faq-meta">
+                            <span><i class="fa-solid fa-clock me-1"></i> ID: ${item.id}</span>
+                            <span>Cập nhật: ${formatDate(item.updated_at)}</span>
+                        </div>
+                    </div>
+                `;
+                container.insertAdjacentHTML('beforeend', html);
+            });
+        }
+
+        function escapeJson(str) {
+            return str.replace(/`/g, '\\`').replace(/\$\{/g, '\\${');
+        }
+
+        function escapeHtml(unsafe) {
+            return unsafe.replace(/[&<"']/g, m => ({'&':'&amp;','<':'&lt;','"':'&quot;',"'":"&#39;"}[m]));
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return "N/A";
+            const date = new Date(dateStr);
+            return date.toLocaleDateString('vi-VN') + " " + date.toLocaleTimeString('vi-VN', {hour: '2-digit', minute:'2-digit'});
+        }
+
+        async function createFAQ() {
+            const cau_hoi = document.getElementById('cau_hoi').value;
+            const cau_tra_loi = document.getElementById('cau_tra_loi').value;
+            const btn = document.querySelector('#add-faq-form button');
+            
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span> Đang lưu dữ liệu...';
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cau_hoi, cau_tra_loi })
+                });
+
+                if (response.ok) {
+                    showToast("FAQ mới đã được lưu và đồng bộ thành công!");
+                    document.getElementById('add-faq-form').reset();
+                    document.getElementById('list-tab').click();
+                    loadFAQ();
+                } else {
+                    const err = await response.json();
+                    showToast(err.detail || "Lỗi khi lưu FAQ", 'error');
+                }
+            } catch (error) {
+                showToast("Lỗi kết nối", 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up me-2"></i> Lưu FAQ & Đồng bộ AI';
+            }
+        }
+
+        function editFAQ(id, q, a) {
+            document.getElementById('edit_faq_id').value = id;
+            document.getElementById('edit_cau_hoi').value = q;
+            document.getElementById('edit_cau_tra_loi').value = a;
+            editModal.show();
+        }
+
+        async function saveEditFAQ() {
+            const id = document.getElementById('edit_faq_id').value;
+            const cau_hoi = document.getElementById('edit_cau_hoi').value;
+            const cau_tra_loi = document.getElementById('edit_cau_tra_loi').value;
+
+            try {
+                const response = await fetch(`${API_URL}/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cau_hoi, cau_tra_loi })
+                });
+
+                if (response.ok) {
+                    showToast("Cập nhật FAQ thành công!");
+                    editModal.hide();
+                    loadFAQ();
+                } else {
+                    showToast("Lỗi khi cập nhật", 'error');
+                }
+            } catch (error) {
+                showToast("Lỗi kết nối", 'error');
+            }
+        }
+
+        async function deleteFAQ(id) {
+            if (!confirm("Bạn có chắc chắn muốn xóa FAQ này? Dữ liệu trên AI cũng sẽ bị gỡ bỏ.")) return;
+            try {
+                const response = await fetch(`${API_URL}/${id}`, { method: 'DELETE' });
+                if (response.ok) {
+                    showToast("Đã xóa FAQ.");
+                    loadFAQ();
+                }
+            } catch (error) {
+                showToast("Lỗi khi xóa", 'error');
+            }
+        }
+    </script>
+</body>
+</html>

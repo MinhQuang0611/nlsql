@@ -106,6 +106,15 @@ def create_app() -> FastAPI:
     async def chat_page():
         return FileResponse(os.path.join(static_dir, "chat.html"))
 
+    @app.get("/manage_knowledge", include_in_schema=False)
+    async def manage_knowledge_page():
+        return FileResponse(os.path.join(static_dir, "manage_knowledge.html"))
+
+    @app.get("/manage_faq", include_in_schema=False)
+    async def manage_faq_page():
+        return FileResponse(os.path.join(static_dir, "manage_faq.html"))
+
+
 
 
     @app.get("/", tags=["Root"], include_in_schema=False)

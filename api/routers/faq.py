@@ -151,3 +151,48 @@ async def delete_faq(faq_id: str = Path(...)):
             logger.error(f"Failed to delete FAQ from Qdrant: {e}")
 
         return {"message": "Đã xóa FAQ thành công."}
+        
+@router.get("/faq/search", response_model=list[FAQResponse])
+async def search_faq(q: str = Query(..., min_length=1)):
+    """
+    Tìm kiếm FAQ bằng Vector Search (Semantic Search)
+    """
+    try:
+        qdrant = get_qdrant_client()
+        embeddings = get_embeddings()
+        
+        vector = embeddings.embed_query(q)
+        
+        search_result = qdrant.search(
+            collection_name=COLLECTION_NAME,
+            query_vector=vector,
+            limit=10,
+            with_payload=True
+        )
+        
+        results = []
+        for hit in search_result:
+            # Map payload back to FAQResponse structure
+            results.append({
+                "id": str(hit.id),
+                "cau_hoi": hit.payload.get("cau_hoi"),
+                "cau_tra_loi": hit.payload.get("cau_tra_loi"),
+                "created_at": hit.payload.get("created_at"),
+                "updated_at": hit.payload.get("updated_at")
+            })
+        return results
+    except Exception as e:
+        logger.error(f"Failed to search FAQ in Qdrant: {e}")
+        # Fallback: search in DB with ILIKE if Qdrant fails
+        async with get_internal_db_context() as db:
+            from sqlalchemy import or_
+            result = await db.execute(
+                select(FAQ).where(
+                    or_(
+                        FAQ.cau_hoi.ilike(f"%{q}%"),
+                        FAQ.cau_tra_loi.ilike(f"%{q}%")
+                    )
+                )
+            )
+            return result.scalars().all()
+

@@ -98,16 +98,10 @@ async def sql_plan_agent(state: AgentState) -> AgentState:
         )),
     ]
 
-<<<<<<< HEAD
     logger.info("[SQLPlanAgent] Generating reasoning plan for query=%r...", user_query)
     # response = await _llm.ainvoke(messages)
     query_plan = ""
     # query_plan = response.content.strip()
-=======
-    logger.info("[SQLPlanAgent] Generating reasoning plan for query=%r, history_len=%d...", user_query, len(history))
-    response = await _llm.ainvoke(messages)
-    query_plan = response.content.strip()
->>>>>>> 8b8ad016f (pull)
 
     logger.info("[SQLPlanAgent] Generated Plan:\n%s", query_plan)
 

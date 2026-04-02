@@ -71,7 +71,6 @@ def build_graph() -> Any:
     builder.add_node("intent", intent_agent)
     builder.add_node("knowledge", knowledge_agent)   # Knowledge / Domain RAG
     builder.add_node("schema", schema_agent)
-    builder.add_node("knowledge", knowledge_agent)
     
     builder.add_node("sql_plan", sql_plan_agent)
     builder.add_node("sql_gen", sql_gen_agent)

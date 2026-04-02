@@ -222,7 +222,7 @@ async def schema_agent(state: AgentState) -> AgentState:
         logger.info("[SchemaAgent] Giới hạn truy vấn trong các bảng được chọn: %s", selected_tables)
         try:
             schema_context = [await _fetch_table_schema(domain, t) for t in selected_tables]
-            return {"relevant_tables": selected_tables, "schema_context": schema_context}
+            return {**state, "relevant_tables": selected_tables, "schema_context": schema_context}
         except Exception as exc:
             logger.error("[SchemaAgent] Lỗi khi lấy schema cho selected_tables: %s", exc)
             return {"relevant_tables": [], "schema_context": []}

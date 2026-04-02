@@ -10,6 +10,7 @@ from qdrant_client import QdrantClient
 from config import get_settings
 from graph.state import AgentState, TableSchema
 from prompts.sql_gen import SQL_GEN_SYSTEM, SQL_GEN_HUMAN, SQL_GEN_RETRY_HINT
+from utils.chat_history import format_history
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -85,15 +86,7 @@ async def sql_gen_agent(state: AgentState) -> AgentState:
     
     schema_str = _format_schema_context(schema_context)
 
-    # Format history
-    if history:
-        lines = []
-        for msg in history:
-            role = "Người dùng" if msg.get("role") == "user" else "Trợ lý"
-            lines.append(f"{role}: {msg.get('content', '')}")
-        history_text = "\n".join(lines)
-    else:
-        history_text = "(Không có lịch sử hội thoại)"
+    history_text = format_history(history)
 
     retry_hint = ""
     if retry_count > 0:

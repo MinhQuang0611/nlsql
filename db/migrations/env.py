@@ -14,6 +14,7 @@ sys.path.append(BASE_DIR)
 from config import get_settings
 from db.connection import Base
 from api.models.business_rule import BusinessRule
+from api.models.faq import FAQ
 
 settings = get_settings()
 

@@ -87,8 +87,12 @@ def create_app() -> FastAPI:
     from api.routers.tables import router as tables_router
     from api.routers.chart import router as chart_router
     from api.routers.knowledge import router as knowledge_router
+    from api.routers.faq import router as faq_router
     app.include_router(chat_router, prefix="/api/v1")
     app.include_router(tables_router, prefix="/api/v1")
+    app.include_router(chart_router, prefix="/api/v1")
+    app.include_router(knowledge_router, prefix="/api/v1")
+    app.include_router(faq_router, prefix="/api/v1")
     app.include_router(chart_router, prefix="/api/v1")
     app.include_router(knowledge_router, prefix="/api/v1")
 

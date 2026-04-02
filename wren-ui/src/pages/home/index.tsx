@@ -243,7 +243,8 @@ export default function Home() {
     }
     setLoading(true);
 
-    const endpoint = selectedTables.length > 0 ? '/api/v1/chat_with_table' : '/api/v1/chat';
+    const defaultEndpoint = typeof window !== 'undefined' ? localStorage.getItem('chat_api_endpoint') || '/api/v1/chat' : '/api/v1/chat';
+    const endpoint = selectedTables.length > 0 ? defaultEndpoint.replace('/chat', '/chat_with_table') : defaultEndpoint;
     const requestSessionId = activeSessionId || `draft-${Date.now()}`;
     const body: any = {
       query: query,

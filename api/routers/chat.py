@@ -99,18 +99,20 @@ async def _process_chat(initial_state: dict) -> ChatResponse:
 
             # Sinh câu hỏi gợi ý tiếp theo (dùng history từ state đã hồi phục)
             if num_recommend > 0:
-                try:
-                    # Lấy history thô từ final_state (nếu có lưu trong state)
-                    # Hoặc để đơn giản, ta vẫn dùng history truyền vào nếu LangGraph chưa tự quản lý State này hoàn toàn
-                    recommend_questions = await generate_recommend_questions(
-                        user_query=user_query,
-                        answer=response.answer,
-                        history=final_state.get("history", []),
-                        num_recommend=num_recommend,
-                    )
-                    response.recommend_questions = recommend_questions
-                except Exception as rec_err:
-                    logger.warning("[Chat] Không thể sinh recommend questions: %s", rec_err)
+                if "recommend_questions" in final_state and final_state["recommend_questions"]:
+                    response.recommend_questions = final_state["recommend_questions"]
+                else:
+                    try:
+                        recommend_questions = await generate_recommend_questions(
+                            user_query=user_query,
+                            answer=response.answer,
+                            history=final_state.get("history", []),
+                            num_recommend=num_recommend,
+                        )
+                        response.recommend_questions = recommend_questions
+
+                    except Exception as rec_err:
+                        logger.warning("[Chat] Không thể sinh recommend questions: %s", rec_err)
 
             # 3. Lưu phản hồi của Assistant vào DB
             async with get_internal_db_context() as db:

@@ -384,11 +384,11 @@ export default function Home() {
           ))}
           {loading && (
             <MessageRow role="assistant">
-                <div className='chatbot-typing-dots' aria-label='Đang phản hồi'>
-											<span />
-											<span />
-											<span />
-								</div>
+              <div className='chatbot-typing-dots' aria-label='Đang phản hồi'>
+                <span />
+                <span />
+                <span />
+              </div>
               <Text type="secondary" italic>Thinking...</Text>
             </MessageRow>
           )}
@@ -397,22 +397,22 @@ export default function Home() {
 
         <InputStickyFooter>
           <InputContainer>
-              <Button
-                type="text"
-                icon={<PlusOutlined style={{ color: "#000"}}/>}
-                onClick={() => setTableModalVisible(true)}
-                style={{
-                  fontSize: 12,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                {/* {selectedTables.length > 0 ? `${selectedTables.length} Tables` : 'Context'} */}
-              </Button>
+            <Button
+              type="text"
+              icon={<PlusOutlined style={{ color: "#000" }} />}
+              onClick={() => setTableModalVisible(true)}
+              style={{
+                fontSize: 12,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              {/* {selectedTables.length > 0 ? `${selectedTables.length} Tables` : 'Context'} */}
+            </Button>
             <CustomTextArea
               placeholder="Ask anything..."
-              style={{ color: "#000"}}
+              style={{ color: "#000" }}
               autoSize={{ minRows: 1, maxRows: 6 }}
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -434,7 +434,7 @@ export default function Home() {
           </InputContainer>
           <div style={{ textAlign: 'center', marginTop: 12 }}>
             <Text type="secondary" style={{ fontSize: 11 }}>
-              Experimental AI. Check important info.
+              Powered by RIPT.
             </Text>
           </div>
         </InputStickyFooter>

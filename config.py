@@ -57,8 +57,8 @@ class Settings(BaseSettings):
     db_echo: bool = False
 
     openai_api_key: str = ""
-    openai_model: str = "gpt-4o-mini"
-    sql_gen_model: str = "gpt-4o"
+    openai_model: str = "gpt-5.4-mini"
+    sql_gen_model: str = "gpt-5.4"
     embedding_model:str = "text-embedding-3-small"
 
     PREDEFINED_FORMULAS: dict[str, str] = {

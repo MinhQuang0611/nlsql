@@ -138,9 +138,53 @@ async def get_internal_db_context() -> AsyncGenerator[AsyncSession, None]:
             raise
 
 async def init_internal_db() -> None:
+    """
+    Khởi tạo database nội bộ:
+    1. Tạo các bảng SQLAlchemy (Conversation, Message, ...)
+    2. Chạy migrations cho LangGraph PostgresSaver (Checkpoint tables)
+    """
+    # 1. Khởi tạo SQLAlchemy models
+    import db.models.chat_history  # noqa: F401
     async with internal_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    logger.info("Khởi tạo schema Internal Postgres thành công")
+    
+    # 2. Khởi tạo LangGraph checkpoint tables
+    # Sử dụng from_conn_string để đảm bảo setup() chạy trong autocommit mode (cần cho CREATE INDEX CONCURRENTLY)
+    from urllib.parse import quote_plus
+    conn_str = (
+        f"postgresql://{settings.postgres_user}:{quote_plus(settings.postgres_password)}"
+        f"@{settings.postgres_host}:{settings.postgres_port}/{settings.postgres_db}"
+        f"?sslmode=disable"
+    )
+    async with AsyncPostgresSaver.from_conn_string(conn_str) as saver:
+        await saver.setup()
+        
+    logger.info("Khởi tạo schema Internal Postgres và LangGraph checkpointer thành công")
+
+# ---------------------------------------------------------------------------
+# LangGraph Postgres Checkpointer
+# ---------------------------------------------------------------------------
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from psycopg_pool import AsyncConnectionPool
+
+@asynccontextmanager
+async def get_checkpoint_saver() -> AsyncGenerator[AsyncPostgresSaver, None]:
+    """
+    Tạo context manager cho AsyncPostgresSaver.
+    Sử dụng internal database (Postgres).
+    """
+    # Xây dựng connection string cho psycopg (v3)
+    from urllib.parse import quote_plus
+    conn_str = (
+        f"postgresql://{settings.postgres_user}:{quote_plus(settings.postgres_password)}"
+        f"@{settings.postgres_host}:{settings.postgres_port}/{settings.postgres_db}"
+        f"?sslmode=disable"
+    )
+    
+    async with AsyncConnectionPool(conn_str, max_size=settings.db_pool_size) as pool:
+        checkpointer = AsyncPostgresSaver(pool)
+        # Bỏ qua await checkpointer.setup() ở đây vì đã chạy trong init_internal_db() lúc khởi động
+        yield checkpointer
 
 # ---------------------------------------------------------------------------
 # Khởi tạo engine theo active_db

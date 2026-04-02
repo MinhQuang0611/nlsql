@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quản lý Luật Nghiệp Vụ - NLSQL</title>
+    <!-- Thêm Bootstrap 5 để có giao diện đẹp và responsive -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Thêm Font Awesome cho các icon -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    
+    <style>
+        :root {
+            --primary-bg: #f8f9fa;
+            --header-bg: #2c3e50;
+            --card-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        body {
+            background-color: var(--primary-bg);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding-bottom: 50px;
+        }
+        .header {
+            background-color: var(--header-bg);
+            color: white;
+            padding: 20px 0;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .card {
+            box-shadow: var(--card-shadow);
+            border: none;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .card-header {
+            background-color: transparent;
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+            font-weight: 600;
+        }
+        .rule-item {
+            background-color: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            border-left: 4px solid #3498db;
+            transition: transform 0.2s;
+        }
+        .rule-item:hover {
+            transform: translateX(5px);
+        }
+        .rule-keyword {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 8px;
+        }
+        .rule-logic {
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            color: #e83e8c;
+            white-space: pre-wrap;
+            border: 1px solid #e9ecef;
+        }
+        .rule-meta {
+            font-size: 0.85rem;
+            color: #6c757d;
+            margin-top: 10px;
+        }
+        .action-btns button {
+            margin-left: 5px;
+        }
+        #toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1055;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header text-center">
+        <h2><i class="fa-solid fa-brain"></i> Quản lý Luật Nghiệp Vụ (Knowledge Agent)</h2>
+        <p class="mb-0 text-white-50">NLSQL Dashboard</p>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast-container"></div>
+
+    <div class="container">
+        <!-- Navigation Tabs -->
+        <ul class="nav nav-tabs mb-4" id="knowledgeTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="list-tab" data-bs-toggle="tab" data-bs-target="#list-pane" type="button" role="tab" aria-controls="list-pane" aria-selected="true">
+                    <i class="fa-solid fa-list"></i> Danh sách Luật
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="add-tab" data-bs-toggle="tab" data-bs-target="#add-pane" type="button" role="tab" aria-controls="add-pane" aria-selected="false">
+                    <i class="fa-solid fa-plus"></i> Thêm mới
+                </button>
+            </li>
+        </ul>
+
+        <!-- Tab Contents -->
+        <div class="tab-content" id="knowledgeTabsContent">
+            
+            <!-- TAB 1: DANH SÁCH LUẬT -->
+            <div class="tab-pane fade show active" id="list-pane" role="tabpanel" aria-labelledby="list-tab">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>Danh sách các từ khoá nghiệp vụ đang có trong hệ thống</span>
+                        <button class="btn btn-sm btn-outline-primary" onclick="loadRules()">
+                            <i class="fa-solid fa-rotate-right"></i> Làm mới
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div id="rules-loading" class="text-center py-4 text-muted">
+                            <div class="spinner-border spinner-border-sm" role="status"></div> Đang tải dữ liệu...
+                        </div>
+                        <div id="rules-empty" class="alert alert-info d-none">
+                            Chưa có quy định nào. Hãy chuyển sang tab "Thêm mới" để tạo luật.
+                        </div>
+                        <div id="rules-container">
+                            <!-- Rule items will be appended here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 2: THÊM MỚI -->
+            <div class="tab-pane fade" id="add-pane" role="tabpanel" aria-labelledby="add-tab">
+                <div class="card">
+                    <div class="card-header">
+                        Thêm định nghĩa nghiệp vụ mới
+                    </div>
+                    <div class="card-body">
+                        <form id="add-rule-form">
+                            <div class="mb-3">
+                                <label for="tu_khoa" class="form-label fw-bold">Từ khoá (VD: Sinh viên giỏi, Doanh thu cao...)</label>
+                                <input type="text" class="form-control" id="tu_khoa" placeholder="Nhập từ khoá..." required>
+                            </div>
+                            <div class="mb-3">
+                                <label for="dinh_nghia" class="form-label fw-bold">Định nghĩa logic (SQL / Text)</label>
+                                <textarea class="form-control" id="dinh_nghia" rows="6" placeholder="Nhập logic xử lý tương ứng..." required></textarea>
+                            </div>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fa-solid fa-save"></i> Lưu luật mới
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Edit Modal -->
+    <div class="modal fade" id="editModal" tabindex="-1" aria-labelledby="editModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="editModalLabel">Chỉnh sửa Luật</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="edit-rule-form">
+                        <input type="hidden" id="edit_rule_id">
+                        <div class="mb-3">
+                            <label for="edit_tu_khoa" class="form-label fw-bold">Từ khoá</label>
+                            <input type="text" class="form-control" id="edit_tu_khoa" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="edit_dinh_nghia" class="form-label fw-bold">Định nghĩa logic</label>
+                            <textarea class="form-control" id="edit_dinh_nghia" rows="6" required></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
+                    <button type="button" class="btn btn-primary" onclick="saveEditRule()">Lưu thay đổi</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Cấu hình URL API
+        // Mặc định gọi cùng domain do file này nằm trong thư mục static của server
+        const API_URL = "/api/v1/knowledge";
+        
+        let editModal;
+
+        document.addEventListener('DOMContentLoaded', function() {
+            editModal = new bootstrap.Modal(document.getElementById('editModal'));
+            loadRules();
+
+            // Submit form thêm mới
+            document.getElementById('add-rule-form').addEventListener('submit', function(e) {
+                e.preventDefault();
+                createRule();
+            });
+        });
+
+        // Hàm hiển thị Toast thông báo
+        function showToast(message, type = 'success') {
+            const toastContainer = document.getElementById('toast-container');
+            const bgClass = type === 'success' ? 'bg-success' : 'bg-danger';
+            
+            const toastHtml = `
+                <div class="toast align-items-center text-white ${bgClass} border-0 show" role="alert" aria-live="assertive" aria-atomic="true" style="margin-bottom: 10px;">
+                    <div class="d-flex">
+                        <div class="toast-body">
+                            ${message}
+                        </div>
+                        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+                    </div>
+                </div>
+            `;
+            
+            toastContainer.insertAdjacentHTML('beforeend', toastHtml);
+            
+            // Xóa toast sau 3 giây
+            const toasts = toastContainer.querySelectorAll('.toast');
+            const currentToast = toasts[toasts.length - 1];
+            setTimeout(() => {
+                currentToast.classList.remove('show');
+                setTimeout(() => currentToast.remove(), 300);
+            }, 3000);
+        }
+
+        // Lấy danh sách luật
+        async function loadRules() {
+            const container = document.getElementById('rules-container');
+            const loader = document.getElementById('rules-loading');
+            const emptyMsg = document.getElementById('rules-empty');
+            
+            container.innerHTML = '';
+            loader.classList.remove('d-none');
+            emptyMsg.classList.add('d-none');
+
+            try {
+                const response = await fetch(API_URL);
+                if (!response.ok) throw new Error("Network response was not ok");
+                
+                const data = await response.json();
+                
+                loader.classList.add('d-none');
+                
+                if (data.length === 0) {
+                    emptyMsg.classList.remove('d-none');
+                    return;
+                }
+
+                data.forEach(rule => {
+                    const html = `
+                        <div class="rule-item" id="rule-${rule.id}">
+                            <div class="d-flex justify-content-between align-items-start">
+                                <div>
+                                    <div class="rule-keyword"><i class="fa-solid fa-tag text-primary me-2"></i>${escapeHtml(rule.tu_khoa)}</div>
+                                </div>
+                                <div class="action-btns">
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="openEditModal('${rule.id}', '${escapeHtml(rule.tu_khoa.replace(/'/g, "\\'"))}', '${escapeHtml(rule.dinh_nghia_sql_logic.replace(/'/g, "\\'").replace(/\n/g, '\\n'))}')" title="Sửa">
+                                        <i class="fa-solid fa-pen"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-danger" onclick="deleteRule('${rule.id}')" title="Xoá">
+                                        <i class="fa-solid fa-trash"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="mt-2">
+                                <div class="rule-logic">${escapeHtml(rule.dinh_nghia_sql_logic)}</div>
+                            </div>
+                            <div class="rule-meta">
+                                Cập nhật: ${rule.updated_at || 'N/A'} | ID: ${rule.id}
+                            </div>
+                        </div>
+                    `;
+                    container.insertAdjacentHTML('beforeend', html);
+                });
+            } catch (error) {
+                loader.classList.add('d-none');
+                showToast("Lỗi khi tải dữ liệu: " + error.message, 'error');
+            }
+        }
+
+        // Thêm luật mới
+        async function createRule() {
+            const tu_khoa = document.getElementById('tu_khoa').value;
+            const dinh_nghia = document.getElementById('dinh_nghia').value;
+            const btn = document.querySelector('#add-rule-form button');
+            
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Đang xử lý...';
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tu_khoa: tu_khoa, dinh_nghia_sql_logic: dinh_nghia })
+                });
+
+                if (response.ok) {
+                    showToast("Tạo luật thành công!");
+                    document.getElementById('add-rule-form').reset();
+                    // Chuyển về tab list và load lại danh sách
+                    document.getElementById('list-tab').click();
+                    loadRules();
+                } else {
+                    const err = await response.json();
+                    showToast("Lỗi: " + (err.detail || response.statusText), 'error');
+                }
+            } catch (error) {
+                showToast("Lỗi kết nối: " + error.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-save"></i> Lưu luật mới';
+            }
+        }
+
+        // Mở modal sửa luật
+        function openEditModal(id, tu_khoa, hinh_nghia) {
+            document.getElementById('edit_rule_id').value = id;
+            document.getElementById('edit_tu_khoa').value = tu_khoa;
+            document.getElementById('edit_dinh_nghia').value = hinh_nghia;
+            editModal.show();
+        }
+
+        // Lưu thay đổi khi sửa
+        async function saveEditRule() {
+            const id = document.getElementById('edit_rule_id').value;
+            const tu_khoa = document.getElementById('edit_tu_khoa').value;
+            const dinh_nghia = document.getElementById('edit_dinh_nghia').value;
+            
+            try {
+                const response = await fetch(`${API_URL}/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tu_khoa: tu_khoa, dinh_nghia_sql_logic: dinh_nghia })
+                });
+
+                if (response.ok) {
+                    showToast("Cập nhật thành công!");
+                    editModal.hide();
+                    loadRules();
+                } else {
+                    const err = await response.json();
+                    showToast("Lỗi: " + (err.detail || response.statusText), 'error');
+                }
+            } catch (error) {
+                showToast("Lỗi kết nối: " + error.message, 'error');
+            }
+        }
+
+        // Xóa luật
+        async function deleteRule(id) {
+            if (!confirm('Bạn có chắc chắn muốn xóa luật này không?')) return;
+            
+            try {
+                const response = await fetch(`${API_URL}/${id}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    showToast("Xóa luật thành công!");
+                    loadRules();
+                } else {
+                    showToast("Lỗi khi xóa: " + response.statusText, 'error');
+                }
+            } catch (error) {
+                showToast("Lỗi kết nối: " + error.message, 'error');
+            }
+        }
+
+        // Hàm hỗ trợ escape HTML tránh XSS
+        function escapeHtml(unsafe) {
+            if (!unsafe) return "";
+            return unsafe
+                 .replace(/&/g, "&amp;")
+                 .replace(/</g, "&lt;")
+                 .replace(/>/g, "&gt;")
+                 .replace(/"/g, "&quot;")
+                 .replace(/'/g, "&#039;");
+        }
+    </script>
+</body>
+</html>

@@ -25,7 +25,7 @@ settings = get_settings()
 
 _KNOWLEDGE_COLLECTION = "knowledge_collection"
 _SEARCH_LIMIT = 5
-_SCORE_THRESHOLD = 0.50   # knowledge docs thường ít chi tiết kỹ thuật hơn schema → threshold thấp hơn
+_SCORE_THRESHOLD = 0.01   # knowledge docs thường ít chi tiết kỹ thuật hơn schema → threshold thấp hơn
 
 _llm = ChatOpenAI(
     model=settings.openai_model,

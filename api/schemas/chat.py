@@ -10,7 +10,8 @@ class HistoryMessage(BaseModel):
 class ChatRequest(BaseModel):
     query: str = Field(..., description="Câu hỏi ngôn ngữ tự nhiên từ người dùng")
     session_id: str = Field("default", description="ID của phiên chat để theo dõi context (tuỳ chọn)")
-    history: list[HistoryMessage] = Field(default_factory=list, description="Lịch sử hội thoại (dùng làm context cho câu hỏi hiện tại)")
+    user_id: Optional[str] = Field(None, description="ID của người dùng (tuỳ chọn, dùng để quản lý hội thoại)")
+    history: list[HistoryMessage] = Field(default_factory=list, description="Lịch sử hội thoại (tuỳ chọn, nếu gửi sẽ ghi đè context hiện tại)")
     num_recommend: int = Field(3, ge=0, le=10, description="Số lượng câu hỏi gợi ý tiếp theo (0 để tắt)")
 
 

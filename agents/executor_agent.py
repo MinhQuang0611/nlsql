@@ -26,7 +26,7 @@ _DANGEROUS_PATTERN = re.compile(
 redis_client = redis.from_url(settings.redis_url, decode_responses=True)
 
 
-async def _execute_sql(sql: str) -> tuple[list[dict[str, Any]], float]:
+async def _execute_sql(sql: str, domain: str) -> tuple[list[dict[str, Any]], float]:
     """
     Thực thi SQL trên DB đang active, trả về (rows, elapsed_ms).
     Tự động route sang ch_execute hoặc AsyncSession theo active_db.
@@ -35,7 +35,7 @@ async def _execute_sql(sql: str) -> tuple[list[dict[str, Any]], float]:
 
     if settings.active_db == "clickhouse":
         # ch_execute trả về list[Row], cần convert sang list[dict]
-        raw_rows = await ch_execute(sql)
+        raw_rows = await ch_execute(domain, sql)
         # clickhouse-sqlalchemy rows có _fields hoặc _mapping
         if raw_rows and hasattr(raw_rows[0], "_mapping"):
             rows = [dict(row._mapping) for row in raw_rows[:MAX_ROWS]]
@@ -44,7 +44,7 @@ async def _execute_sql(sql: str) -> tuple[list[dict[str, Any]], float]:
         else:
             rows = [dict(enumerate(row)) for row in raw_rows[:MAX_ROWS]]
     else:
-        async with get_db_context() as db:
+        async with get_db_context(domain) as db:
             result = await db.execute(text(sql))
             keys = list(result.keys())
             rows = [dict(zip(keys, row)) for row in result.fetchmany(MAX_ROWS)]
@@ -54,7 +54,7 @@ async def _execute_sql(sql: str) -> tuple[list[dict[str, Any]], float]:
 
 
 async def executor_agent(state: AgentState) -> AgentState:
-
+    domain = state.get("domain", "qldt")
     final_sql = state.get("final_sql", "").strip()
     user_query = state.get("user_query", "").strip()
 
@@ -111,7 +111,7 @@ async def executor_agent(state: AgentState) -> AgentState:
     logger.info("[ExecutorAgent] executing SQL on %s:\n%s", settings.active_db, final_sql)
 
     try:
-        rows, elapsed_ms = await _execute_sql(final_sql)
+        rows, elapsed_ms = await _execute_sql(final_sql, domain)
         row_count = len(rows)
         logger.info("[ExecutorAgent] OK — %d rows in %.1f ms", row_count, elapsed_ms)
 
@@ -127,7 +127,7 @@ async def executor_agent(state: AgentState) -> AgentState:
         if elapsed_ms > 2000 and settings.active_db != "clickhouse":
             logger.warning("[ExecutorAgent] SLOW QUERY DETECTED: %.1fms. Collecting physical plan...", elapsed_ms)
             try:
-                async with get_db_context() as slow_db:
+                async with get_db_context(domain) as slow_db:
                     explain_res = await slow_db.execute(text(f"EXPLAIN ANALYZE {final_sql}"))
                     explain_text = "\n".join(r[0] for r in explain_res.fetchall())
                     logger.warning("EXPLAIN ANALYZE OUTPUT:\n%s", explain_text)

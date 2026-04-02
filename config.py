@@ -14,13 +14,15 @@ class Settings(BaseSettings):
 
     pg_db_host: str = "localhost"
     pg_db_port: int = 5432
-    pg_db_name: str = "nlsql"
+    pg_db_name_qldt: str = "qldt"
+    pg_db_name_tcns: str = "tcns"
     pg_db_user: str = "postgres"
     pg_db_password: str = ""
 
     ch_db_host: str = "localhost"
     ch_db_port: int = 8123
-    ch_db_name: str = "nlsql"
+    ch_db_name_qldt: str = "qldt"
+    ch_db_name_tcns: str = "tcns"
     ch_db_user: str = "default"
     ch_db_password: str = ""
 
@@ -40,9 +42,10 @@ class Settings(BaseSettings):
     def db_port(self) -> int:
         return self.pg_db_port if self.active_db == "postgres" else self.ch_db_port
 
-    @property
-    def db_name(self) -> str:
-        return self.pg_db_name if self.active_db == "postgres" else self.ch_db_name
+    def get_db_name(self, domain: str = "qldt") -> str:
+        if self.active_db == "postgres":
+            return self.pg_db_name_qldt if domain == "qldt" else self.pg_db_name_tcns
+        return self.ch_db_name_qldt if domain == "qldt" else self.ch_db_name_tcns
 
     @property
     def db_user(self) -> str:
@@ -91,19 +94,18 @@ class Settings(BaseSettings):
 
     # Config cho DataBase Postgres
      
-    @property
-    def database_url(self) -> str:
+    def get_database_url(self, domain: str = "qldt") -> str:
         from urllib.parse import quote_plus
         if self.active_db == "clickhouse":
             native_port = 19000 if self.db_port == 18123 else self.db_port
             return (
                 f"clickhouse+asynch://{self.db_user}:{quote_plus(self.db_password)}"
-                f"@{self.db_host}:{native_port}/{self.db_name}"
+                f"@{self.db_host}:{native_port}/{self.get_db_name(domain)}"
             )
         else:
             return (
                 f"postgresql+asyncpg://{self.db_user}:{quote_plus(self.db_password)}"
-                f"@{self.db_host}:{self.db_port}/{self.db_name}"
+                f"@{self.db_host}:{self.db_port}/{self.get_db_name(domain)}"
                 f"?ssl=disable"
             )
 
@@ -116,18 +118,17 @@ class Settings(BaseSettings):
             f"?ssl=disable"
         )
 
-    @property
-    def database_url_sync(self) -> str:
+    def get_database_url_sync(self, domain: str = "qldt") -> str:
         from urllib.parse import quote_plus
         if self.active_db == "clickhouse":
             return (
                 f"clickhouse+http://{self.db_user}:{quote_plus(self.db_password)}"
-                f"@{self.db_host}:8123/{self.db_name}"
+                f"@{self.db_host}:{self.db_port}/{self.get_db_name(domain)}"
             )
         else:
             return (
                 f"postgresql+psycopg2://{self.db_user}:{quote_plus(self.db_password)}"
-                f"@{self.db_host}:{self.db_port}/{self.db_name}"
+                f"@{self.db_host}:{self.db_port}/{self.get_db_name(domain)}"
                 f"?sslmode=disable"
             )
 

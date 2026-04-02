@@ -111,14 +111,14 @@ _PG_GET_SAMPLE = 'SELECT * FROM "{table}" LIMIT 3'
 # Fetch helpers — Postgres
 # ---------------------------------------------------------------------------
 
-async def _pg_fetch_all_tables() -> list[str]:
-    async with get_db_context() as db:
+async def _pg_fetch_all_tables(domain: str) -> list[str]:
+    async with get_db_context(domain) as db:
         result = await db.execute(_PG_GET_TABLES)
         return [row[0] for row in result.fetchall()]
 
 
-async def _pg_fetch_table_schema(table_name: str) -> TableSchema:
-    async with get_db_context() as db:
+async def _pg_fetch_table_schema(domain: str, table_name: str) -> TableSchema:
+    async with get_db_context(domain) as db:
         desc_row = (await db.execute(_PG_GET_TABLE_DESC, {"table_name": table_name})).fetchone()
         description = desc_row[0] if desc_row and desc_row[0] else None
 
@@ -155,14 +155,14 @@ async def _pg_fetch_table_schema(table_name: str) -> TableSchema:
 # Fetch helpers — ClickHouse
 # ---------------------------------------------------------------------------
 
-async def _ch_fetch_all_tables() -> list[str]:
-    rows = await ch_execute(_CH_GET_TABLES)
+async def _ch_fetch_all_tables(domain: str) -> list[str]:
+    rows = await ch_execute(domain, _CH_GET_TABLES)
     return [row[0] for row in rows]
 
 
-async def _ch_fetch_table_schema(table_name: str) -> TableSchema:
-    col_sql = _CH_GET_COLUMNS.format(db=settings.ch_db_name, table=table_name)
-    col_rows = await ch_execute(col_sql)
+async def _ch_fetch_table_schema(domain: str, table_name: str) -> TableSchema:
+    col_sql = _CH_GET_COLUMNS.format(db=settings.get_db_name(domain), table=table_name)
+    col_rows = await ch_execute(domain, col_sql)
 
     columns: list[TableColumn] = [
         TableColumn(
@@ -175,7 +175,7 @@ async def _ch_fetch_table_schema(table_name: str) -> TableSchema:
     ]
 
     sample_sql = _CH_GET_SAMPLE.format(table=table_name)
-    sample_raw = await ch_execute(sample_sql)
+    sample_raw = await ch_execute(domain, sample_sql)
     if sample_raw and hasattr(sample_raw[0], "_mapping"):
         sample_rows = [dict(r._mapping) for r in sample_raw]
     elif sample_raw and hasattr(sample_raw[0], "_fields"):
@@ -197,16 +197,16 @@ async def _ch_fetch_table_schema(table_name: str) -> TableSchema:
 # Unified helpers (route theo active_db)
 # ---------------------------------------------------------------------------
 
-async def _fetch_all_tables() -> list[str]:
+async def _fetch_all_tables(domain: str) -> list[str]:
     if settings.active_db == "clickhouse":
-        return await _ch_fetch_all_tables()
-    return await _pg_fetch_all_tables()
+        return await _ch_fetch_all_tables(domain)
+    return await _pg_fetch_all_tables(domain)
 
 
-async def _fetch_table_schema(table_name: str) -> TableSchema:
+async def _fetch_table_schema(domain: str, table_name: str) -> TableSchema:
     if settings.active_db == "clickhouse":
-        return await _ch_fetch_table_schema(table_name)
-    return await _pg_fetch_table_schema(table_name)
+        return await _ch_fetch_table_schema(domain, table_name)
+    return await _pg_fetch_table_schema(domain, table_name)
 
 
 # ---------------------------------------------------------------------------
@@ -214,13 +214,14 @@ async def _fetch_table_schema(table_name: str) -> TableSchema:
 # ---------------------------------------------------------------------------
 
 async def schema_agent(state: AgentState) -> AgentState:
+    domain = state.get("domain", "qldt")
     user_query = state["user_query"]
     selected_tables = state.get("selected_tables")
 
     if selected_tables:
         logger.info("[SchemaAgent] Giới hạn truy vấn trong các bảng được chọn: %s", selected_tables)
         try:
-            schema_context = [await _fetch_table_schema(t) for t in selected_tables]
+            schema_context = [await _fetch_table_schema(domain, t) for t in selected_tables]
             return {**state, "relevant_tables": selected_tables, "schema_context": schema_context}
         except Exception as exc:
             logger.error("[SchemaAgent] Lỗi khi lấy schema cho selected_tables: %s", exc)
@@ -239,7 +240,7 @@ async def schema_agent(state: AgentState) -> AgentState:
 
         vector = embeddings.embed_query(user_query)
         response = qdrant.query_points(
-            collection_name="schema_collection",
+            collection_name=f"schema_collection_{domain}",
             query=vector,
             limit=SEARCH_LIMIT,
             with_payload=True,
@@ -280,7 +281,7 @@ async def schema_agent(state: AgentState) -> AgentState:
                 len(relevant_tables),
             )
             try:
-                all_table_names = await _fetch_all_tables()
+                all_table_names = await _fetch_all_tables(domain)
                 table_list_str = "\n".join(f"- {t}" for t in all_table_names)
                 rules_str = "\n".join(f"- {k}: {v}" for k, v in settings.TABLE_RULES.items())
                 fallback_prompt = (
@@ -302,7 +303,7 @@ async def schema_agent(state: AgentState) -> AgentState:
                 logger.info("[SchemaAgent] LLM fallback suggested: %s → valid new: %s", llm_tables, new_tables)
 
                 for tname in new_tables:
-                    schema = await _fetch_table_schema(tname)
+                    schema = await _fetch_table_schema(domain, tname)
                     relevant_tables.append(tname)
                     schema_context.append(schema)
 

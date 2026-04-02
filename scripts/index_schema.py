@@ -56,110 +56,124 @@ async def main():
         api_key=settings.openai_api_key
     )
     
-    collections = qdrant.get_collections().collections
-    if not any(c.name == COLLECTION_NAME for c in collections):
-        logger.info(f"Creating collection {COLLECTION_NAME}")
-        qdrant.create_collection(
-            collection_name=COLLECTION_NAME,
-            vectors_config=VectorParams(size=1536, distance=Distance.COSINE),
-        )
-    else:
-        logger.info(f"Collection {COLLECTION_NAME} already exists. Skipping indexing.")
-        return
-
-    all_tables = await _fetch_all_tables()
-    logger.info(f"Found {len(all_tables)} tables in database.")
-    
-    excel_metadata = load_excel_metadata("QLDT_FINAL.xlsx")
-    
-    points = []
-    
-    for idx, table_name in enumerate(all_tables):
-        schema = await _fetch_table_schema(table_name)
+    domains = ["qldt", "tcns"]
+    for domain in domains:
+        collection_name = f"schema_collection_{domain}"
+        logger.info(f"--- Processing domain: {domain} ---")
         
-        table_meta = excel_metadata.get(table_name, {})
-        excel_table_desc = table_meta.get("table_desc", "")
-        col_meta_dict = table_meta.get("columns", {})
-        
-        col_vi_parts = []
-        enum_hints = []
-
-        for c in schema["columns"]:
-            c_name = c["name"]
-            c_meta = col_meta_dict.get(c_name, {})
-            vi_name = c_meta.get("vi_name", "")
-            note = c_meta.get("note", "")
-            db_comment = c.get("comment") or ""
-
-            if vi_name or note:
-                c["excel_vi_name"] = vi_name
-                c["excel_note"] = note
-
-            label = f"{vi_name} ({c_name})" if vi_name else c_name
-            col_vi_parts.append(label)
-
-            raw_note = note or db_comment
-            if raw_note and "/" in raw_note:
-                enum_hints.append(f"  - {label} có thể nhận giá trị: {raw_note}")
-
-        if excel_table_desc:
-            schema["excel_table_desc"] = excel_table_desc
-
-        # Sentence 1: table purpose
-        table_label = excel_table_desc if excel_table_desc else table_name
-        db_desc = schema.get("description", "") or ""
-        if db_desc and db_desc != excel_table_desc:
-            sent1 = f"Bảng {table_name} lưu thông tin về {table_label}. {db_desc}"
-        else:
-            sent1 = f"Bảng {table_name} lưu thông tin về {table_label}."
-
-        # Sentence 2: column list
-        cols_str = ", ".join(col_vi_parts)
-        sent2 = f"Các thông tin bao gồm: {cols_str}."
-
-        # Sentence 3 (optional): enum/status hints
-        sent3 = ""
-        if enum_hints:
-            sent3 = "\n" + "\n".join(enum_hints)
-
-        # Sentence 4 (optional): foreign keys
-        fks_str = ""
-        if schema.get("foreign_keys"):
-            fks = [
-                f"  - {fk['column_name']} liên kết tới bảng {fk['foreign_table']}({fk['foreign_column']})"
-                for fk in schema["foreign_keys"]
-                if fk.get("column_name")
-            ]
-            if fks:
-                fks_str = "\nLiên kết:\n" + "\n".join(fks)
-
-        embed_text = f"{sent1}\n{sent2}{sent3}{fks_str}"
-        
-        vector = embeddings.embed_query(embed_text)
-        
-        payload = {
-            "table_name": table_name,
-            # "schema_json": json.dumps(schema, default=str),
-            "embed_text": embed_text
-        }
-        
-        points.append(
-            PointStruct(
-                id=idx + 1,
-                vector=vector,
-                payload=payload
+        collections = qdrant.get_collections().collections
+        if not any(c.name == collection_name for c in collections):
+            logger.info(f"Creating collection {collection_name}")
+            qdrant.create_collection(
+                collection_name=collection_name,
+                vectors_config=VectorParams(size=1536, distance=Distance.COSINE),
             )
-        )
-        logger.info(f"Generated embedding for table: {table_name}")
+        else:
+            logger.info(f"Collection {collection_name} already exists. Skipping indexing.")
+            continue
+            
+        try:
+            all_tables = await _fetch_all_tables(domain)
+            logger.info(f"Found {len(all_tables)} tables in database for domain {domain}.")
+        except Exception as e:
+            logger.error(f"Failed to fetch tables for domain {domain}: {e}")
+            continue
+        
+        excel_file = f"{domain.upper()}_FINAL.xlsx"
+        import os
+        if os.path.exists(excel_file):
+            excel_metadata = load_excel_metadata(excel_file)
+        else:
+            excel_metadata = {}
+            logger.warning(f"Metadata file {excel_file} not found. Proceeding without metadata.")
 
-    if points:
-        qdrant.upsert(
-            collection_name=COLLECTION_NAME,
-            points=points
-        )
-        logger.info(f"Successfully inserted {len(points)} tables into Qdrant.")
-    else:
-        logger.warning("No tables were found to index.")
+        points = []
+        
+        for idx, table_name in enumerate(all_tables):
+            schema = await _fetch_table_schema(domain, table_name)
+            
+            table_meta = excel_metadata.get(table_name, {})
+            excel_table_desc = table_meta.get("table_desc", "")
+            col_meta_dict = table_meta.get("columns", {})
+            
+            col_vi_parts = []
+            enum_hints = []
+
+            for c in schema["columns"]:
+                c_name = c["name"]
+                c_meta = col_meta_dict.get(c_name, {})
+                vi_name = c_meta.get("vi_name", "")
+                note = c_meta.get("note", "")
+                db_comment = c.get("comment") or ""
+
+                if vi_name or note:
+                    c["excel_vi_name"] = vi_name
+                    c["excel_note"] = note
+
+                label = f"{vi_name} ({c_name})" if vi_name else c_name
+                col_vi_parts.append(label)
+
+                raw_note = note or db_comment
+                if raw_note and "/" in raw_note:
+                    enum_hints.append(f"  - {label} có thể nhận giá trị: {raw_note}")
+
+            if excel_table_desc:
+                schema["excel_table_desc"] = excel_table_desc
+
+            # Sentence 1: table purpose
+            table_label = excel_table_desc if excel_table_desc else table_name
+            db_desc = schema.get("description", "") or ""
+            if db_desc and db_desc != excel_table_desc:
+                sent1 = f"Bảng {table_name} lưu thông tin về {table_label}. {db_desc}"
+            else:
+                sent1 = f"Bảng {table_name} lưu thông tin về {table_label}."
+
+            # Sentence 2: column list
+            cols_str = ", ".join(col_vi_parts)
+            sent2 = f"Các thông tin bao gồm: {cols_str}."
+
+            # Sentence 3 (optional): enum/status hints
+            sent3 = ""
+            if enum_hints:
+                sent3 = "\n" + "\n".join(enum_hints)
+
+            # Sentence 4 (optional): foreign keys
+            fks_str = ""
+            if schema.get("foreign_keys"):
+                fks = [
+                    f"  - {fk['column_name']} liên kết tới bảng {fk['foreign_table']}({fk['foreign_column']})"
+                    for fk in schema["foreign_keys"]
+                    if fk.get("column_name")
+                ]
+                if fks:
+                    fks_str = "\nLiên kết:\n" + "\n".join(fks)
+
+            embed_text = f"{sent1}\n{sent2}{sent3}{fks_str}"
+            
+            vector = embeddings.embed_query(embed_text)
+            
+            payload = {
+                "table_name": table_name,
+                "embed_text": embed_text
+            }
+            
+            points.append(
+                PointStruct(
+                    id=idx + 1,
+                    vector=vector,
+                    payload=payload
+                )
+            )
+            logger.info(f"Generated embedding for table: {table_name} (domain: {domain})")
+
+        if points:
+            qdrant.upsert(
+                collection_name=collection_name,
+                points=points
+            )
+            logger.info(f"Successfully inserted {len(points)} tables into Qdrant for collection {collection_name}.")
+        else:
+            logger.warning(f"No tables were found to index for domain {domain}.")
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -18,6 +18,7 @@ export interface Props {
   onSelect: (selectKeys) => void;
   onDelete: (id: string) => Promise<void>;
   onRename: (id: string, newName: string) => Promise<void>;
+  collapsed?: boolean;
 }
 
 export const StyledSidebarTree = styled(SidebarTree)`
@@ -76,9 +77,10 @@ export default function Home(props: Props) {
           'adm-treeNode--selected': router.pathname === Path.HomeDashboard,
         })}
         href={Path.HomeDashboard}
+        style={{ justifyContent: props.collapsed ? 'center' : 'flex-start' }}
       >
-        <FundViewOutlined className="mr-2" />
-        <span className="text-medium">Dashboard</span>
+        <FundViewOutlined className={props.collapsed ? '' : 'mr-2'} />
+        {!props.collapsed && <span className="text-medium">Dashboard</span>}
       </StyledTreeNodeLink>
       <ThreadTree
         threads={threads}

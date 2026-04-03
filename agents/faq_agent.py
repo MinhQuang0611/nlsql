@@ -90,8 +90,4 @@ async def faq_agent(state: AgentState) -> AgentState:
         }
 
     logger.info("[FAQAgency] Không trúng FAQ, chuyển sang xử lý mặc định.")
-    # Pass along recommend_questions anyway, they might be useful
-    if recommend_questions:
-        return {**state, "recommend_questions": recommend_questions}
-    
     return state

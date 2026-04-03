@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Layout } from 'antd';
 import styled, { css } from 'styled-components';
 import SimpleLayout from '@/components/layouts/SimpleLayout';
@@ -21,6 +22,8 @@ const StyledContentLayout = styled(Layout)<{ color?: string }>`
 const StyledSider = styled(Sider)`
   ${basicStyle}
   background-color: var(--white) !important;
+  border-right: 1px solid var(--gray-4);
+  position: relative;
 `;
 
 type Props = React.ComponentProps<typeof SimpleLayout> & {
@@ -30,13 +33,25 @@ type Props = React.ComponentProps<typeof SimpleLayout> & {
 
 export default function SiderLayout(props: Props) {
   const { sidebar, loading, color } = props;
+  const [collapsed, setCollapsed] = useState(false);
   const settings = useModalAction();
 
   return (
     <SimpleLayout loading={loading}>
       <Layout className="adm-layout">
-        <StyledSider width={280}>
-          <Sidebar {...sidebar} onOpenSettings={settings.openModal} />
+        <StyledSider 
+          width={280} 
+          collapsedWidth={64} 
+          trigger={null} 
+          collapsible 
+          collapsed={collapsed}
+        >
+          <Sidebar 
+            {...sidebar} 
+            onOpenSettings={settings.openModal} 
+            collapsed={collapsed} 
+            onToggle={() => setCollapsed(!collapsed)}
+          />
         </StyledSider>
         <StyledContentLayout color={color}>
           {props.children}

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Layout, Input, Button, Typography, Space, Spin, Modal } from 'antd';
+import { Layout, Input, Button, Typography, Space, Spin, Modal, message } from 'antd';
 import styled from 'styled-components';
 import { Logo } from '@/components/Logo';
 import dynamic from 'next/dynamic';
@@ -8,6 +8,11 @@ import SiderLayout from '@/components/layouts/SiderLayout';
 import ChatChartAnswer from '@/components/chart/ChatChartAnswer';
 import SendOutlined from '@ant-design/icons/SendOutlined';
 import PlusOutlined from '@ant-design/icons/PlusOutlined';
+import CopyOutlined from '@ant-design/icons/CopyOutlined';
+import CheckOutlined from '@ant-design/icons/CheckOutlined';
+import AudioOutlined from '@ant-design/icons/AudioOutlined';
+import StopOutlined from '@ant-design/icons/StopOutlined';
+import LoadingOutlined from '@ant-design/icons/LoadingOutlined';
 
 const { Content } = Layout;
 const { Text, Title, Paragraph } = Typography;
@@ -15,8 +20,6 @@ const { Text, Title, Paragraph } = Typography;
 // --- Styled Components (ChatGPT Style) ---
 
 const MainContent = styled.div`
-  max-width: 800px;
-  margin: 0 auto;
   width: 100%;
   display: flex;
   flex-direction: column;
@@ -24,13 +27,21 @@ const MainContent = styled.div`
   position: relative;
 `;
 
-const ChatWindow = styled.div`
-  flex: 1;
-  overflow-y: auto;
-  padding: 40px 20px 100px 20px;
+const ScrollableContainer = styled.div`
+  max-width: 800px;
+  margin: 0 auto;
+  width: 100%;
   display: flex;
   flex-direction: column;
   gap: 32px;
+`;
+
+const ChatWindow = styled.div`
+  flex: 1;
+  overflow-y: auto;
+  padding: 40px 20px 150px 20px;
+  display: flex;
+  flex-direction: column;
 `;
 
 const MessageRow = styled.div<{ role: 'user' | 'assistant' }>`
@@ -87,6 +98,12 @@ const InputContainer = styled.div`
   &:focus-within {
     border-color: var(--red-5);
   }
+
+  @keyframes pulse {
+    0% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.1); opacity: 0.7; }
+    100% { transform: scale(1); opacity: 1; }
+  }
 `;
 
 const CustomTextArea = styled(Input.TextArea)`
@@ -132,6 +149,111 @@ const SqlBlock = styled.pre`
   }
 `;
 
+const ThinkingText = styled(Text)`
+  font-style: italic;
+  color: var(--gray-6);
+  
+  &::after {
+    content: '.';
+    display: inline-block;
+    animation: ellipsis 1.5s infinite;
+    width: 12px;
+    text-align: left;
+  }
+
+  @keyframes ellipsis {
+    0% { content: '.'; }
+    33% { content: '..'; }
+    66% { content: '...'; }
+  }
+`;
+
+const ExpandableSql = ({ sql }: { sql: string }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [isOverflowing, setIsOverflowing] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const contentRef = useRef<HTMLPreElement>(null);
+
+  useEffect(() => {
+    if (contentRef.current) {
+      // Check if content is taller than 80px
+      setIsOverflowing(contentRef.current.scrollHeight > 80);
+    }
+  }, [sql]);
+
+  const onCopy = () => {
+    navigator.clipboard.writeText(sql);
+    setCopied(true);
+    message.success({
+      content: 'Đã sao chép SQL vào clipboard!',
+      duration: 2,
+    });
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div style={{ position: 'relative', marginTop: 12 }}>
+      <div style={{ position: 'relative' }}>
+        <SqlBlock
+          ref={contentRef}
+          style={{
+            maxHeight: isExpanded ? 'none' : '80px',
+            overflow: isExpanded ? 'auto' : 'hidden',
+            marginBottom: 0,
+            paddingRight: '44px', // Space for copy button
+            maskImage: (!isExpanded && isOverflowing) ? 'linear-gradient(to bottom, rgba(0,0,0,1) 60%, rgba(0,0,0,0) 100%)' : 'none',
+            WebkitMaskImage: (!isExpanded && isOverflowing) ? 'linear-gradient(to bottom, rgba(0,0,0,1) 60%, rgba(0,0,0,0) 100%)' : 'none'
+          }}
+        >
+          {sql}
+        </SqlBlock>
+        <Button
+          type="text"
+          size="small"
+          className="copy-sql-btn"
+          icon={copied ? <CheckOutlined style={{ color: '#52c41a' }} /> : <CopyOutlined />}
+          onClick={onCopy}
+          style={{
+            position: 'absolute',
+            top: '8px',
+            right: '8px',
+            zIndex: 2,
+            background: 'rgba(255, 255, 255, 0.8)',
+            border: '1px solid var(--gray-4)',
+            borderRadius: '6px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transition: 'all 0.2s'
+          }}
+        />
+      </div>
+      {isOverflowing && (
+        <div style={{ textAlign: 'center', marginTop: isExpanded ? 8 : -15, position: 'relative', zIndex: 1 }}>
+          <Button
+            type="default"
+            size="small"
+            shape="round"
+            onClick={() => setIsExpanded(!isExpanded)}
+            style={{
+              fontSize: 10,
+              background: 'white',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+              border: '1px solid var(--gray-4)',
+              height: '22px',
+              padding: '0 10px',
+              color: 'var(--gray-7)'
+            }}
+          >
+            {isExpanded ? 'Thu gọn' : 'Xem toàn bộ SQL'}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+
 
 
 // --- Utility Functions ---
@@ -164,6 +286,10 @@ export default function Home() {
   const [availableTables, setAvailableTables] = useState<Record<string, string>>({});
   const [selectedTables, setSelectedTables] = useState<string[]>([]);
   const [tableModalVisible, setTableModalVisible] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isProcessingSTT, setIsProcessingSTT] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // Load history and tables on mount
@@ -220,6 +346,95 @@ export default function Home() {
 
     setSessions({ ...currentSessions });
     saveSessions(currentSessions);
+  };
+
+  // --- STT Logic ---
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        await uploadAudio();
+      };
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error('Microphone error:', err);
+      message.error('Không thể truy cập micro. Vui lòng kiểm tra quyền trình duyệt.');
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecording(false);
+    setIsProcessingSTT(true);
+  };
+
+  const uploadAudio = async () => {
+    const mimeType = mediaRecorderRef.current?.mimeType || 'audio/webm';
+    const ext = mimeType.includes('ogg') ? 'ogg' : mimeType.includes('mp4') ? 'mp4' : 'webm';
+    const blob = new Blob(audioChunksRef.current, { type: mimeType });
+    const formData = new FormData();
+    formData.append('file', blob, `recording.${ext}`);
+    formData.append('webhook_url', 'http://localhost/noop');
+
+    const STT_ENDPOINT = 'https://zenify-stt.ript.vn/api/v1/stt/zipformer';
+    try {
+      const res = await fetch(STT_ENDPOINT, { method: 'POST', body: formData });
+      if (!res.ok) throw new Error(`STT upload failed: ${res.status}`);
+      const data = await res.json();
+      if (!data.job_id) throw new Error('No job_id in response');
+      await pollSttStatus(data.job_id);
+    } catch (err) {
+      console.error('STT error:', err);
+      message.error('Lỗi khi nhận dạng giọng nói. Vui lòng thử lại.');
+      setIsProcessingSTT(false);
+    }
+  };
+
+  const pollSttStatus = async (jobId: string) => {
+    const POLL_INTERVAL_MS = 1500;
+    const POLL_TIMEOUT_MS = 60000;
+    const STT_STATUS_ENDPOINT = 'https://zenify-stt.ript.vn/api/v1/stt/zipformer/status';
+    const deadline = Date.now() + POLL_TIMEOUT_MS;
+
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+      try {
+        const res = await fetch(`${STT_STATUS_ENDPOINT}/${jobId}`);
+        if (!res.ok) throw new Error(`Status check failed: ${res.status}`);
+        const data = await res.json();
+        const status = (data.status || '').toLowerCase();
+        if (status === 'success') {
+          const transcript = data.transcription?.toLowerCase() || '';
+          if (transcript) {
+            setInput(prev => (prev ? `${prev} ${transcript}` : transcript));
+            message.success('Đã nhận dạng giọng nói thành công!');
+          } else {
+            message.warning('Không nhận dạng được nội dung. Vui lòng thử lại.');
+          }
+          setIsProcessingSTT(false);
+          return;
+        } else if (status === 'failed' || status === 'error' || status === 'cancelled') {
+          throw new Error(`STT job ${status}`);
+        }
+      } catch (pollErr) {
+        console.error('Poll error:', pollErr);
+        message.error('Lỗi khi kiểm tra kết quả nhận dạng.');
+        setIsProcessingSTT(false);
+        return;
+      }
+    }
+    message.error('Hết thời gian chờ nhận dạng giọng nói. Vui lòng thử lại.');
+    setIsProcessingSTT(false);
   };
 
 
@@ -321,79 +536,81 @@ export default function Home() {
     <SiderLayout loading={false} sidebar={sidebarProps}>
       <MainContent>
         <ChatWindow>
-          {chatHistory.length === 0 && (
-            <div className="d-flex align-center justify-center flex-column" style={{ height: '100%', marginTop: '10vh' }}>
-              <Logo size={80} color="var(--gray-3)" />
-              <Title level={3} className="mt-6">Xin chào! Tôi có thể giúp gì cho bạn</Title>
-              <Space wrap size="small" style={{ marginTop: 12, justifyContent: 'center' }}>
-                {suggestedQuestions.map((question) => (
-                  <SuggestedQuestionButton
-                    key={question}
-                    size="small"
-                    shape="round"
-                    disabled={loading}
-                    onClick={() => sendMessage(question)}
-                  >
-                    {question}
-                  </SuggestedQuestionButton>
-                ))}
-              </Space>
-            </div>
-          )}
-
-          {chatHistory.map((msg: any, idx: number) => (
-            <MessageRow key={idx} role={msg.role}>
-              {msg.role === 'assistant' && (
-                <AvatarCircle>
-                  <Logo size={18} />
-                </AvatarCircle>
-              )}
-              <MessageBubble role={msg.role}>
-                {msg.role === 'assistant' ? (
-                  <div dangerouslySetInnerHTML={{ __html: msg.content.replace(/\n/g, '<br/>') }} />
-                ) : (
-                  msg.content
-                )}
-
-                {msg.sql && (
-                  <SqlBlock>{msg.sql}</SqlBlock>
-                )}
-
-                {msg.data && msg.data.length > 0 && (
-                  <ChatChartAnswer
-                    chartConfig={msg.chart_config || {}}
-                    data={msg.data}
-                  />
-                )}
-
-                {msg.execution_time_ms !== undefined && (
-                  <div style={{ marginTop: 8, fontSize: 11, color: 'var(--gray-6)', textAlign: 'right' }}>
-                    ⚡ Execution: {msg.execution_time_ms.toFixed(0)}ms
-                    {msg.slowest_node && ` | Slowest: ${msg.slowest_node}`}
-                  </div>
-                )}
-
-                {msg.recommend_questions && (
-                  <Space wrap className="mt-6" size="small">
-                    {msg.recommend_questions.map((q: string, qidx: number) => (
-                      <Button key={qidx} size="small" shape="round" onClick={() => sendMessage(q)} style={{ borderColor: 'var(--gray-4)', fontSize: 12 }}>{q}</Button>
-                    ))}
-                  </Space>
-                )}
-              </MessageBubble>
-            </MessageRow>
-          ))}
-          {loading && (
-            <MessageRow role="assistant">
-              <div className='chatbot-typing-dots' aria-label='Đang phản hồi'>
-                <span />
-                <span />
-                <span />
+          <ScrollableContainer>
+            {chatHistory.length === 0 && (
+              <div className="d-flex align-center justify-center flex-column" style={{ height: '70vh', marginTop: '10vh' }}>
+                <Logo size={80} color="var(--gray-3)" />
+                <Title level={3} className="mt-6">Xin chào! Tôi có thể giúp gì cho bạn</Title>
+                <Space wrap size="small" style={{ marginTop: 12, justifyContent: 'center' }}>
+                  {suggestedQuestions.map((question) => (
+                    <SuggestedQuestionButton
+                      key={question}
+                      size="small"
+                      shape="round"
+                      disabled={loading}
+                      onClick={() => sendMessage(question)}
+                    >
+                      {question}
+                    </SuggestedQuestionButton>
+                  ))}
+                </Space>
               </div>
-              <Text type="secondary" italic>Thinking...</Text>
-            </MessageRow>
-          )}
-          <div ref={chatEndRef} />
+            )}
+
+            {chatHistory.map((msg: any, idx: number) => (
+              <MessageRow key={idx} role={msg.role}>
+                {msg.role === 'assistant' && (
+                  <AvatarCircle>
+                    <Logo size={18} />
+                  </AvatarCircle>
+                )}
+                <MessageBubble role={msg.role}>
+                  {msg.role === 'assistant' ? (
+                    <div dangerouslySetInnerHTML={{ __html: msg.content.replace(/\n/g, '<br/>') }} />
+                  ) : (
+                    msg.content
+                  )}
+
+                  {msg.sql && (
+                    <ExpandableSql sql={msg.sql} />
+                  )}
+
+                  {msg.data && msg.data.length > 0 && (
+                    <ChatChartAnswer
+                      chartConfig={msg.chart_config || {}}
+                      data={msg.data}
+                    />
+                  )}
+
+                  {msg.execution_time_ms !== undefined && (
+                    <div style={{ marginTop: 8, fontSize: 11, color: 'var(--gray-6)', textAlign: 'right' }}>
+                      ⚡ Execution: {msg.execution_time_ms.toFixed(0)}ms
+                      {msg.slowest_node && ` | Slowest: ${msg.slowest_node}`}
+                    </div>
+                  )}
+
+                  {msg.recommend_questions && (
+                    <Space wrap className="mt-6" size="small">
+                      {msg.recommend_questions.map((q: string, qidx: number) => (
+                        <Button key={qidx} size="small" shape="round" onClick={() => sendMessage(q)} style={{ borderColor: 'var(--gray-4)', fontSize: 12 }}>{q}</Button>
+                      ))}
+                    </Space>
+                  )}
+                </MessageBubble>
+              </MessageRow>
+            ))}
+            {loading && (
+              <MessageRow role="assistant">
+                <div className='chatbot-typing-dots' aria-label='Đang phản hồi'>
+                  <span />
+                  <span />
+                  <span />
+                </div>
+                <ThinkingText>Thinking</ThinkingText>
+              </MessageRow>
+            )}
+            <div ref={chatEndRef} />
+          </ScrollableContainer>
         </ChatWindow>
 
         <InputStickyFooter>
@@ -426,15 +643,34 @@ export default function Home() {
               disabled={loading}
             />
             <Button
+              type="text"
+              icon={isProcessingSTT ? <LoadingOutlined /> : (isRecording ? <StopOutlined style={{ color: 'var(--red-5)' }} /> : <AudioOutlined style={{ color: isRecording || isProcessingSTT ? 'var(--red-5)' : 'var(--red-5)', opacity: loading ? 0.5 : 1 }} />)}
+              onClick={isRecording ? stopRecording : startRecording}
+              disabled={isProcessingSTT || loading}
+              style={{
+                fontSize: 18,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: '8px',
+                padding: '4px',
+                animation: isRecording ? 'pulse 1.5s infinite' : 'none',
+                background: isRecording ? 'rgba(230, 57, 70, 0.1)' : 'transparent',
+                color: 'var(--red-5)'
+              }}
+            />
+            <Button
               type="primary"
               icon={<SendOutlined />}
               onClick={() => sendMessage()}
+              loading={loading}
               disabled={!input.trim() || loading}
               style={{ borderRadius: '8px' }}
             />
           </InputContainer>
-          <div style={{ textAlign: 'center', marginTop: 12 }}>
-            <Text type="secondary" style={{ fontSize: 11 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 12 }}>
+            <img src="/images/ript-logo.png" style={{ height: 20, width: 'auto' }} alt="RIPT Logo" />
+            <Text type="secondary" style={{ fontSize: 13, color: "#32057aff" }}>
               Powered by RIPT.
             </Text>
           </div>

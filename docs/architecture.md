@@ -1,71 +1,124 @@
-Tôi đã cập nhật lại kiến trúc hệ thống NLSQL để phản chiếu các tính năng mới nhất về **FAQ (Fast Track)**, **Cơ sở dữ liệu nội bộ (Internal DB)** và luồng xử lý Agent tối ưu.
+# Tài liệu Kiến trúc Hệ thống NLSQL (Cập nhật)
 
-### 1. Sơ đồ luồng xử lý LangGraph (Workflow Diagram)
+Tài liệu này mô tả chi tiết kiến trúc Agentic Workflow của hệ thống NLSQL, sử dụng LangGraph để điều phối các AI Agent chuyên biệt.
+
+## 1. Sơ đồ Luồng Hoạt động (Workflow Diagram)
+
+Dưới đây là sơ đồ chi tiết các bước xử lý từ khi người dùng đặt câu hỏi đến khi nhận được câu trả lời cuối cùng.
 
 ```mermaid
 graph TD
-    START((Bắt đầu)) --> FAQ[FAQ Agent: Kiểm tra câu hỏi thường gặp]
+    %% Khởi đầu
+    START((Bắt đầu)) --> FAQ[FAQ Agent]
     
-    %% FAQ rẽ nhánh nhanh
-    FAQ -->|Trúng FAQ >= 0.7| Answer[Answer Agent: Trả lời kèm gợi ý]
-    FAQ -->|Không trúng| Intent[Intent Agent: Phân loại ý định]
+    %% Luồng FAQ (Fast Track)
+    FAQ -- "Trúng FAQ (Score >= 0.7)" --> END((Kết thúc))
+    FAQ -- "Không trúng" --> Intent[Intent Agent]
 
-    %% Phân nhánh theo Intent truyền thống
-    Intent -->|greeting/out_of_scope| Answer
-    Intent -->|ambiguous| Clarify[Clarification Agent: Hỏi lại người dùng]
-    Intent -->|knowledge_query| Knowledge[Knowledge Agent: Tìm Quy định/Nghiệp vụ]
-    Intent -->|data_query/chart/schema| Schema[Schema Agent: Tìm bảng & Schema]
+    %% Phân loại ý định (Routing)
+    Intent -- "greeting / out_of_scope" --> Answer[Answer Agent]
+    Intent -- "ambiguous" --> Clarify[Clarification Agent]
+    Intent -- "knowledge_query" --> Knowledge[Knowledge Agent]
+    Intent -- "domain_query" --> Knowledge
+    Intent -- "data_query / chart / schema" --> Schema[Schema Agent]
 
-    %% Luồng tri thức & Truy vấn dữ liệu
-    Knowledge -->|Nếu chỉ hỏi quy định| Answer
-    Schema -->|schema_question| Answer
-    Schema --> Knowledge2[Knowledge Agent: Lấy logic SQL bổ trợ]
-    Knowledge2 --> Plan[SQL Plan Agent: Lập kế hoạch truy vấn]
-    Plan --> Gen[SQL Gen Agent: Viết câu lệnh SQL]
-    Gen --> Check[SQL Check Agent: Kiểm tra & Sửa lỗi]
+    %% Xử lý Tri thức & Schema
+    Knowledge -- "Chỉ hỏi quy định" --> Answer
+    Knowledge -- "Cần thêm schema (domain_query)" --> Schema
+    Knowledge -- "Sẵn sàng lập kế hoạch SQL" --> Plan[SQL Plan Agent]
     
-    %% Vòng lặp sửa lỗi (Retry)
-    Check -->|Sai| Retry[Ghi nhận lỗi & Thử lại]
-    Retry --> Gen
-    Check -->|Đúng/Hết lượt thử| Exec[Executor Agent: Chạy SQL lấy dữ liệu]
+    Schema -- "Câu hỏi về cấu trúc DB" --> Answer
+    Schema -- "Cần thêm logic nghiệp vụ" --> Knowledge
+    Schema -- "Sẵn sàng lập kế hoạch SQL" --> Plan
+
+    %% Chu trình tạo SQL
+    Plan --> Gen[SQL Gen Agent]
+    Gen --> Check[SQL Check Agent]
     
-    %% Bước cuối
-    Exec --> Chart[Chart Agent: Vẽ biểu đồ nếu cần]
+    %% Vòng lặp sửa lỗi SQL
+    Check -- "Lỗi (Thử lại < 3 lần)" --> Gen
+    Check -- "Hợp lệ / Hết lượt thử" --> Exec[Executor Agent]
+    
+    %% Phản hồi cuối cùng
+    Exec --> Chart[Chart Agent]
     Chart --> Answer
-    Answer --> END((Kết thúc & Lưu lịch sử))
+    Answer --> END
     Clarify --> END
+
+    %% Định dạng style
+    style START fill:#f9f,stroke:#333,stroke-width:4px
+    style END fill:#f9f,stroke:#333,stroke-width:4px
+    style FAQ fill:#bbf,stroke:#333,stroke-width:2px
+    style Gen fill:#dfd,stroke:#333,stroke-width:2px
+    style Check fill:#fdd,stroke:#333,stroke-width:2px
 ```
 
 ---
 
-### 2. Chi tiết các thành phần mới
+## 2. Mô tả Chi tiết các Agent
 
-#### A. FAQ Agent (Fast-Track Flow)
-Đây là "người gác cổng" mới của hệ thống:
-- **Cơ chế**: Sử dụng Vector Search (Qdrant `faq_collection`) để so khớp câu hỏi người dùng với kho câu hỏi thường gặp.
-- **Hiệu năng**: Nếu độ tương quan semantic >= **0.7**, hệ thống trả lời ngay lập tức (Bypass qua toàn bộ luồng LLM phía sau), giúp tốc độ phản hồi cực nhanh (< 1s).
-- **Gợi ý**: Tự động đề xuất 3 câu hỏi FAQ liên quan nhất để người dùng tiếp tục tương tác.
+### 2.1. FAQ Agent (Cổng ưu tiên)
+- **Nhiệm vụ**: Kiểm tra xem câu hỏi có nằm trong bộ FAQ (Frequently Asked Questions) đã được biên soạn sẵn hay không.
+- **Công nghệ**: Sử dụng Vector Search (Qdrant) với ngưỡng tương đồng (Threshold) là **0.7**.
+- **Kết quả**: Nếu trúng, hệ thống trả về kết quả ngay lập tức (Bypass qua các Agent khác), giúp tốc độ phản hồi cực nhanh.
 
-#### B. Cơ sở dữ liệu nội bộ (Internal Database - PostgreSQL)
-Hệ thống hiện tại sử dụng mô hình Database kép:
-1. **Analytical DB**: ClickHouse / PostgreSQL bên ngoài (Chỉ đọc) để truy vấn số liệu nghiệp vụ.
-2. **Internal Management DB**: PostgreSQL riêng (Port 8389) dùng để quản lý:
-    - **Quy định nghiệp vụ (Business Rules)**: Định nghĩa các khái niệm logic cho AI.
-    - **FAQ**: Kho câu hỏi và trả lời sẵn có.
-    - **Lịch sử chat & Checkpoints**: Lưu trạng thái phiên làm việc của LangGraph.
-- **Quản lý**: Sử dụng **Alembic** để bảo trì và nâng cấp cấu trúc bảng (Migrations).
+### 2.2. Intent Agent (Chuyên gia phân tích ý định)
+- **Nhiệm vụ**: Phân tích câu hỏi của người dùng để quyết định hướng đi tiếp theo.
+- **Các loại ý định**:
+    - `data_query`: Truy vấn số liệu từ database.
+    - `knowledge_query`: Hỏi về quy định, chính sách, hoặc định nghĩa nghiệp vụ.
+    - `domain_query`: Câu hỏi phức tạp cần kết hợp cả database và quy định nghiệp vụ.
+    - `ambiguous`: Câu hỏi chưa rõ ràng, cần hỏi lại người dùng.
+    - `greeting` / `out_of_scope`: Chào hỏi hoặc câu hỏi ngoài phạm vi.
 
-#### C. Lập kế hoạch SQL thông minh (SQL Planning)
-- **SQL Plan Agent**: Thay vì viết SQL ngay, Agent này phân tích Schema + Quy định nghiệp vụ để tạo ra "Bản thiết kế truy vấn" (Query Plan) bằng ngôn ngữ tự nhiên, giúp giảm thiểu sai sót logic khi Join nhiều bảng phức tạp.
+### 2.3. Knowledge & Schema Agents (Ngữ cảnh nghiệp vụ & Dữ liệu)
+- **Knowledge Agent**: Tìm kiếm các quy định nghiệp vụ (Business Rules) trong Qdrant để bổ trợ cho việc viết SQL hoặc trả lời trực tiếp.
+- **Schema Agent**: Xác định các bảng và cột dữ liệu liên quan nhất đến câu hỏi.
+
+### 2.4. SQL Gen Pipeline (Plan -> Gen -> Check)
+- **SQL Plan Agent**: Lập kế hoạch truy vấn (ví dụ: cần Join bảng nào, Filter điều kiện gì) bằng ngôn ngữ tự nhiên.
+- **SQL Gen Agent**: Chuyển kế hoạch thành câu lệnh SQL thực tế (PostgreSQL/ClickHouse).
+- **SQL Check Agent**: Kiểm tra lỗi cú pháp và logic. Nếu sai, Agent này sẽ gửi phản hồi kèm lỗi để `SQL Gen Agent` sửa lại (tối đa 3 lần).
+
+---
+
+## 3. Ví dụ Luồng Hoạt động (Input -> Output)
+
+### Ví dụ 1: Luồng FAQ (Fast Track)
+- **Người dùng**: "Làm thế nào để đăng ký tài khoản mới?"
+- **FAQ Agent**: Tìm thấy câu hỏi tương tự trong kho với Score 0.9.
+- **Output**: Trả về câu trả lời đã lưu sẵn: "Để đăng ký tài khoản, bạn vui lòng truy cập..." kèm 3 câu hỏi gợi ý liên quan.
+- **Trạng thái**: Kết thúc sớm (Bypass).
+
+### Ví dụ 2: Luồng Truy vấn Dữ liệu (Data Query)
+- **Người dùng**: "Top 5 chi nhánh có doanh thu cao nhất tháng 3/2024 là gì?"
+- **FAQ Agent**: Không tìm thấy kết quả tương đồng cao.
+- **Intent Agent**: Phân loại là `data_query`.
+- **Schema Agent**: Xác định bảng `sales`, `branches` và các cột `revenue`, `branch_name`, `sale_date`.
+- **Knowledge Agent**: Lấy quy tắc: "Doanh thu = giá bán * số lượng - chiết khấu".
+- **SQL Plan Agent**: "Cần Join bảng sales và branches, sum revenue, filter theo tháng 3/2024, group by branch_name, order by desc, limit 5".
+- **SQL Gen Agent**: Tạo câu lệnh `SELECT ... FROM ... WHERE ...`.
+- **SQL Check Agent**: Kiểm tra cú pháp hợp lệ.
+- **Executor Agent**: Chạy SQL trên DB và lấy về danh sách 5 chi nhánh.
+- **Answer Agent**: "Dưới đây là top 5 chi nhánh có doanh thu cao nhất..." kèm bảng dữ liệu hoặc biểu đồ.
+
+### Ví dụ 3: Luồng Quy định (Knowledge Query)
+- **Người dùng**: "Chính sách hoa hồng cho đại lý cấp 1 là bao nhiêu?"
+- **Intent Agent**: Phân loại là `knowledge_query`.
+- **Knowledge Agent**: Tìm kiếm trong tài liệu nghiệp vụ và thấy đoạn: "Đại lý cấp 1 có tỷ lệ hoa hồng là 15% trên tổng giá trị đơn hàng..."
+- **Answer Agent**: Tổng hợp và trả lời trực tiếp cho người dùng dựa trên thông tin tìm được.
 
 ---
 
-### 3. Các tính năng nổi bật (Key Capabilities)
+## 4. Quản lý Trạng thái (State Management)
 
-1. **Định nghĩa Logic động (Business Context)**: Bạn có thể thêm quy định "Doanh thu thuần = Doanh thu - Chiết khấu" vào hệ thống qua API/UI, AI sẽ tự động áp dụng công thức này vào mọi câu lệnh SQL sau đó.
-2. **Tùy chọn Nguồn dữ liệu (Data Source Selection)**: Người dùng có thể chọn phạm vi dữ liệu trực tiếp trên giao diện (Toàn bộ / Đào tạo / Nhân sự) để định hướng API tìm kiếm chính xác hơn.
-3. **Cơ chế Retry & Check**: Luồng `SQL Gen <-> SQL Check` tự động sửa lỗi cú pháp đến 3 lần trước khi thực thi, đảm bảo tỷ lệ thành công cao cho các câu lệnh phức tạp.
-4. **Tích hợp Qdrant (Hybrid Search)**: Kết hợp giữa tìm kiếm Vector (cho FAQ/Knowledge) và tìm kiếm Metadata (cho Schema) để cung cấp ngữ cảnh đầy đủ nhất cho LLM.
+Hệ thống sử dụng `AgentState` để truyền thông tin giữa các Agent:
+- `user_query`: Câu hỏi gốc của người dùng.
+- `intent`: Ý định đã được phân loại.
+- `sql`: Câu lệnh SQL đã được tạo.
+- `data_result`: Dữ liệu thô từ database.
+- `history`: Lịch sử trò chuyện để giữ ngữ cảnh.
+- `retry_count`: Đếm số lần thử lại khi tạo SQL lỗi.
 
 ---
-*Tài liệu này được cập nhật theo phiên bản tích hợp FAQ Agent và Internal DB Version Control.*
+*Tài liệu này được cập nhật tự động để phản ánh kiến trúc Agentic đa tầng của NLSQL.*

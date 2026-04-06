@@ -5,7 +5,7 @@ x-common: &common
 
 services:
   app:
-    image: registry.gitlab.aisoftech.vn/dungdq/mass_chatbot
+    image: registry.gitlab.aisoftech.vn/dungdq/text2dashboard
     container_name: nlsql_app_prod
     <<: *common
     ports:

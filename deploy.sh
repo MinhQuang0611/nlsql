@@ -32,4 +32,15 @@ echo ">>> Deploying with Docker Compose (Production)..."
 docker compose -f docker-compose.prod.yml down
 docker compose -f docker-compose.prod.yml up -d
 
+echo ">>> Waiting for DB to be ready..."
+sleep 10 # Give the DB time to start
+
+if [ -f "$CONFIG_DIR/db_backup.sql" ]; then
+    echo ">>> Restoring database from $CONFIG_DIR/db_backup.sql..."
+    cat "$CONFIG_DIR/db_backup.sql" | docker exec -i nlsql_postgres_prod psql -U postgres postgres
+    echo ">>> Database restoration completed."
+else
+    echo ">>> No db_backup.sql found. Skipping restoration."
+fi
+
 echo ">>> Deployment completed successfully!"

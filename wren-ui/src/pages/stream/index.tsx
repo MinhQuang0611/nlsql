@@ -270,7 +270,7 @@ const saveSessions = (sessions: any) => {
   window.dispatchEvent(new Event('chat_sessions_updated')); // Trigger sidebar reload
 };
 
-export default function Home() {
+export default function StreamPage() {
   const suggestedQuestions = [
     'Tổng số lượng sinh viên hiện tại?',
     'Thống kê sinh viên theo từng ngành học',
@@ -290,6 +290,7 @@ export default function Home() {
   const [isProcessingSTT, setIsProcessingSTT] = useState(false);
   const [streamingMode, setStreamingMode] = useState(false);
   const [currentlyThinkingNode, setCurrentlyThinkingNode] = useState<string | null>(null);
+  const [streamingAnswer, setStreamingAnswer] = useState('');
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -302,8 +303,8 @@ export default function Home() {
     // Fetch tables
     fetch('/api/v1/tables').then(res => res.json()).then(setAvailableTables);
 
-    // Always disable streaming mode for this page
-    setStreamingMode(false);
+    // Always enable streaming mode for this page
+    setStreamingMode(true);
   }, []);
 
   useEffect(() => {
@@ -480,7 +481,102 @@ export default function Home() {
       body.selected_tables = selectedTables;
     }
 
-    // Streaming is disabled on this page.
+    if (isStreamingSupported) {
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+
+        if (!response.body) throw new Error('No response body');
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const jsonStr = line.replace('data: ', '');
+              try {
+                const eventData = JSON.parse(jsonStr);
+                if (eventData.event === 'node_finish') {
+                  setCurrentlyThinkingNode(eventData.node);
+                  setStreamingAnswer(''); // reset when new node starts
+                  // Artificial delay to make step transitions visible
+                  await new Promise(r => setTimeout(r, 80));
+                } else if (eventData.event === 'answer_token') {
+                  setCurrentlyThinkingNode(null);
+                  setStreamingAnswer(prev => prev + eventData.token);
+                } else if (eventData.event === 'final_result') {
+                  const data = eventData.data;
+                  const aiMsg = {
+                    role: 'assistant',
+                    content: data.error ? `❌ Error: ${data.error}` : data.answer,
+                    sql: data.sql,
+                    data: data.data,
+                    chart_config: data.chart_config,
+                    recommend_questions: data.recommend_questions,
+                    execution_time_ms: data.execution_time_ms,
+                    slowest_node: data.slowest_node,
+                    id: `ai-${Date.now()}`
+                  };
+
+                  if (!data.error && isDraftMode) {
+                    const newSessionId = `session-${Date.now()}`;
+                    const newSession = {
+                      id: newSessionId,
+                      title,
+                      messages: [...newMessages, aiMsg],
+                      updatedAt: Date.now(),
+                    };
+                    const updated = { ...loadSessions(), [newSessionId]: newSession };
+                    setSessions(updated);
+                    saveSessions(updated);
+                    setActiveSessionId(newSessionId);
+                    setDraftMessages([]);
+                  } else if (isDraftMode) {
+                    setDraftMessages([...newMessages, aiMsg]);
+                  } else {
+                    updateSessionMessages(activeSessionId, [...newMessages, aiMsg]);
+                  }
+                  setCurrentlyThinkingNode(null);
+                  setStreamingAnswer('');
+                } else if (eventData.event === 'error') {
+                   throw new Error(eventData.detail || 'Unknown stream error');
+                }
+              } catch (e) {
+                console.error('Error parsing stream JSON:', e);
+              }
+            }
+          }
+        }
+        return; // Finished streaming successfully
+      } catch (e) {
+        console.error('Streaming error:', e);
+        const errorMessage = {
+          role: 'assistant',
+          content: '❌ Streaming error. ' + (e as Error).message,
+        };
+        if (isDraftMode) {
+          setDraftMessages([...newMessages, errorMessage]);
+        } else {
+          updateSessionMessages(activeSessionId, [...newMessages, errorMessage]);
+        }
+        setCurrentlyThinkingNode(null);
+        setLoading(false);
+        return;
+      } finally {
+        setLoading(false);
+      }
+    }
 
     try {
       const res = await fetch(endpoint, {
@@ -551,7 +647,7 @@ export default function Home() {
             {chatHistory.length === 0 && (
               <div className="d-flex align-center justify-center flex-column" style={{ height: '70vh', marginTop: '10vh' }}>
                 <Logo size={80} color="var(--gray-3)" />
-                <Title level={3} className="mt-6">Xin chào! Tôi có thể giúp gì cho bạn</Title>
+                <Title level={3} className="mt-6">AI Chat (Streaming Mode)</Title>
                 <Space wrap size="small" style={{ marginTop: 12, justifyContent: 'center' }}>
                   {suggestedQuestions.map((question) => (
                     <SuggestedQuestionButton
@@ -612,11 +708,34 @@ export default function Home() {
             ))}
             {loading && (
               <MessageRow role="assistant">
-                <div className='chatbot-typing-dots' aria-label='Đang phản hồi'>
-                  <span />
-                  <span />
-                  <span />
-                </div>
+                <AvatarCircle>
+                  <Logo size={18} />
+                </AvatarCircle>
+                <MessageBubble role="assistant">
+                  {streamingAnswer ? (
+                    <div style={{ whiteSpace: 'pre-wrap' }}>
+                      {streamingAnswer}
+                      <span style={{
+                        display: 'inline-block',
+                        width: '2px',
+                        height: '1em',
+                        background: 'var(--gray-7)',
+                        marginLeft: '2px',
+                        verticalAlign: 'text-bottom',
+                        animation: 'blink-cursor 0.7s step-start infinite'
+                      }} />
+                    </div>
+                  ) : (
+                    <div className='chatbot-typing-dots' aria-label='Đang phản hồi'>
+                      <span /><span /><span />
+                    </div>
+                  )}
+                  {!streamingAnswer && currentlyThinkingNode && (
+                    <ThinkingText>
+                      Thinking ({currentlyThinkingNode})
+                    </ThinkingText>
+                  )}
+                </MessageBubble>
               </MessageRow>
             )}
             <div ref={chatEndRef} />

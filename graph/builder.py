@@ -26,33 +26,25 @@ def route_after_faq(state: AgentState) -> str:
         return END
     return "intent"
 
-def route_after_intent(state: AgentState) -> str:
+def route_after_intent(state: AgentState) -> str | list[str]:
     intent = state.get("intent")
-    if intent in ("data_query", "chart_request", "schema_question"):
+    if intent == "domain_query":
+        return ["schema", "knowledge"]
+    if intent == "data_query" or intent == "chart_request":
+        return ["schema", "knowledge"]
+    if intent == "schema_question":
         return "schema"
-    if intent in ("domain_query", "knowledge_query"):
+    if intent == "knowledge_query":
         return "knowledge"
     if intent == "ambiguous":
         return "clarification"
     return "answer"  # greeting, out_of_scope
 
-
-def route_after_knowledge(state: AgentState) -> str:
+def route_after_retrieval(state: AgentState) -> str:
     intent = state.get("intent")
-    if intent == "knowledge_query":
+    if intent == "knowledge_query" or intent == "schema_question":
         return "answer"
-    if intent == "domain_query":
-        return "schema"
     return "sql_plan"
-
-
-def route_after_schema(state: AgentState) -> str:
-    intent = state.get("intent")
-    if intent == "schema_question":
-        return "answer"
-    if intent == "domain_query":
-        return "sql_plan"
-    return "knowledge"
 
 
 def route_after_sql_check(state: AgentState) -> str:
@@ -109,21 +101,15 @@ def build_graph(checkpointer: Any = None) -> Any:
         }
     )
 
-    builder.add_conditional_edges(
-        "knowledge",
-        route_after_knowledge,
-        {
-            "answer": "answer",
-            "schema": "schema",
-            "sql_plan": "sql_plan",
-        }
-    )
+    # Join point for parallel retrieval
+    builder.add_node("retrieval_join", lambda state: state)
+    builder.add_edge("schema", "retrieval_join")
+    builder.add_edge("knowledge", "retrieval_join")
 
     builder.add_conditional_edges(
-        "schema",
-        route_after_schema,
+        "retrieval_join",
+        route_after_retrieval,
         {
-            "knowledge": "knowledge",
             "answer": "answer",
             "sql_plan": "sql_plan",
         }
@@ -148,4 +134,16 @@ def build_graph(checkpointer: Any = None) -> Any:
 
     app = builder.compile(checkpointer=checkpointer)
     return app
+
+
+_cached_app = None
+
+def get_graph_app(checkpointer: Any = None) -> Any:
+    """
+    Returns a singleton instance of the compiled graph.
+    """
+    global _cached_app
+    if _cached_app is None:
+        _cached_app = build_graph(checkpointer=checkpointer)
+    return _cached_app
 

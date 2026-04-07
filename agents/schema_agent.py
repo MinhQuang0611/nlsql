@@ -222,10 +222,10 @@ async def schema_agent(state: AgentState) -> AgentState:
         logger.info("[SchemaAgent] Giới hạn truy vấn trong các bảng được chọn: %s", selected_tables)
         try:
             schema_context = [await _fetch_table_schema(domain, t) for t in selected_tables]
-            return {**state, "relevant_tables": selected_tables, "schema_context": schema_context}
+            return {"relevant_tables": selected_tables, "schema_context": schema_context}
         except Exception as exc:
             logger.error("[SchemaAgent] Lỗi khi lấy schema cho selected_tables: %s", exc)
-            return {**state, "relevant_tables": [], "schema_context": []}
+            return {"relevant_tables": [], "schema_context": []}
 
     SCORE_THRESHOLD = 0.68
     SEARCH_LIMIT = 20
@@ -314,4 +314,4 @@ async def schema_agent(state: AgentState) -> AgentState:
         logger.error("[SchemaAgent] Qdrant search failed: %s. Ensure Qdrant is running and populated.", exc)
 
     logger.info("[SchemaAgent] Final relevant_tables = %s", relevant_tables)
-    return {**state, "relevant_tables": relevant_tables, "schema_context": schema_context}
+    return {"relevant_tables": relevant_tables, "schema_context": schema_context}

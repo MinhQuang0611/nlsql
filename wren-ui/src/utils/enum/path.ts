@@ -1,5 +1,6 @@
 export enum Path {
   Home = '/home',
+  Stream = '/stream',
   HomeDashboard = '/home/dashboard',
   Thread = '/home/[id]',
   Modeling = '/modeling',

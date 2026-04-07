@@ -61,7 +61,7 @@ const DynamicSidebar = (
   const { pathname, collapsed, onToggle, ...restProps } = props;
 
   const getContent = () => {
-    if (pathname.startsWith(Path.Home)) {
+    if (pathname.startsWith(Path.Home) || pathname === Path.Stream) {
       if ((restProps as HistorySidebarProps).isHistoryMode) {
         return (
           <HistorySidebar

@@ -10,7 +10,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy import text
 
 from config import get_settings
-from db.connection import engine
+
 from graph.state import AgentState, SQLCorrectionResult, TableSchema
 from prompts.sql_check import SQL_CORRECTION_SYSTEM, SQL_CORRECTION_HUMAN
 
@@ -19,7 +19,7 @@ settings = get_settings()
 
 _llm = ChatOpenAI(
     model=settings.openai_model,
-    temperature=0,
+    temperature=settings.llm_temperature,
     api_key=settings.openai_api_key,
 )
 
@@ -66,14 +66,16 @@ async def sql_check_agent(state: AgentState) -> AgentState:
         logger.warning("[SQLCheckAgent] BLOCKED by safety gate: %s", hard_result["issues"])
         return {**state, "sql_correction": hard_result, "final_sql": ""}
 
-    # 1. Try to run EXPLAIN on Database directly! If success, no need for LLM.
+    domain = state.get("domain", "qldt")
+
     try:
         if settings.active_db == "clickhouse":
             from db.connection import ch_execute
-            await ch_execute(f"EXPLAIN {generated_sql}")
+            await ch_execute(domain, f"EXPLAIN {generated_sql}")
         else:
-            async with engine.connect() as conn:
-                await conn.execute(text(f"EXPLAIN {generated_sql}"))
+            from db.connection import get_db_context
+            async with get_db_context(domain) as db:
+                await db.execute(text(f"EXPLAIN {generated_sql}"))
             
         logger.info("[SQLCheckAgent] PASS (EXPLAIN OK). No LLM correction needed.")
         success_result = SQLCorrectionResult(

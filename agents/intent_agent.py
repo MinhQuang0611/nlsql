@@ -10,13 +10,14 @@ from pydantic import BaseModel, Field
 from config import get_settings
 from graph.state import AgentState
 from prompts.intent import INTENT_SYSTEM, INTENT_HUMAN
+from utils.chat_history import format_history
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
 _llm = ChatOpenAI(
     model=settings.openai_model,
-    temperature=0,
+    temperature=settings.llm_temperature,
     api_key=settings.openai_api_key,
 )
 
@@ -28,21 +29,13 @@ class IntentClassifierSchema(BaseModel):
 VALID_INTENTS = {"data_query", "chart_request", "schema_question", "greeting", "out_of_scope", "ambiguous", "knowledge_query", "domain_query"}
 
 
-def _format_history(history: list[dict]) -> str:
-    """Chuyển list history [{"role": ..., "content": ...}] thành chuỗi dễ đọc cho LLM."""
-    if not history:
-        return "(Không có lịch sử hội thoại)"
-    lines = []
-    for msg in history:
-        role = "Người dùng" if msg.get("role") == "user" else "Trợ lý"
-        lines.append(f"{role}: {msg.get('content', '')}")
-    return "\n".join(lines)
+
 
 
 async def intent_agent(state: AgentState) -> AgentState:
     user_query = state.get("user_query", "")
     history = state.get("history", [])
-    history_text = _format_history(history)
+    history_text = format_history(history)
     logger.info("[IntentAgent] query=%r, history_len=%d", user_query, len(history))
 
     messages = [

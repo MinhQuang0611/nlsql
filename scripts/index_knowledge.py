@@ -44,9 +44,9 @@ settings = get_settings()
 # ── Constants ────────────────────────────────────────────────────────────────
 COLLECTION_NAME = "knowledge_collection"
 VECTOR_SIZE = 1536          # text-embedding-3-small
-SHEET_ID = "1zQAKdpIWs_rDo5E-8yYQ-u3bf-iO2QMyCSxHMMA-PNE"
-SHEET_NAME = "Trang tính 1"
-CREDENTIALS_FILE = os.path.join(os.path.dirname(__file__), "..", "utils", "ascendant-nova-478100-q0-a825170022ba.json")
+SHEET_ID = settings.sheets_knowledge_id
+SHEET_NAME = settings.sheets_knowledge_name
+CREDENTIALS_FILE = os.path.abspath(settings.google_sheets_credentials_file)
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets.readonly",
     "https://www.googleapis.com/auth/drive.readonly",

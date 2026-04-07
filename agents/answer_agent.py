@@ -10,13 +10,14 @@ from config import get_settings
 from graph.state import AgentState
 from prompts.answer import ANSWER_SYSTEM, ANSWER_HUMAN
 from prompts.knowledge import DOMAIN_ANSWER_SYSTEM, DOMAIN_ANSWER_HUMAN
+from utils.chat_history import format_history
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
 _llm = ChatOpenAI(
     model=settings.openai_model,
-    temperature=0,  # Phải là 0 để đảm bảo kết quả deterministc, tránh số liệu bị diễn giải khác nhau
+    temperature=settings.llm_temperature,
     api_key=settings.openai_api_key,
 )
 
@@ -69,15 +70,7 @@ async def answer_agent(state: AgentState) -> AgentState:
     preview_rows = query_result[:_MAX_PREVIEW_ROWS]
     has_chart = chart_config is not None
 
-    # Format history
-    if history:
-        lines = []
-        for msg in history:
-            role = "Người dùng" if msg.get("role") == "user" else "Trợ lý"
-            lines.append(f"{role}: {msg.get('content', '')}")
-        history_text = "\n".join(lines)
-    else:
-        history_text = "(Không có lịch sử hội thoại)"
+    history_text = format_history(history)
 
     logger.info("[AnswerAgent] generating answer for %d rows, has_chart=%s, history_len=%d, has_knowledge=%s", row_count, has_chart, len(history), bool(knowledge_context))
 

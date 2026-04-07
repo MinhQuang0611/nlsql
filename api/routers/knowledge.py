@@ -1,5 +1,5 @@
 import logging
-from fastapi import APIRouter, HTTPException, Path
+from fastapi import APIRouter, HTTPException, Path, Query
 from sqlalchemy.future import select
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import Distance, VectorParams, PointStruct
@@ -43,6 +43,39 @@ async def startup_event():
     qdrant = get_qdrant_client()
     ensure_collection(qdrant)
 
+@router.get("/knowledge/search", response_model=list[BusinessRuleResponse])
+async def search_knowledge(q: str = Query(..., description="Query for vector search")):
+    try:
+        qdrant = get_qdrant_client()
+        embeddings = get_embeddings()
+        
+        # Embed the query
+        vector = embeddings.embed_query(q)
+        
+        # Search Qdrant
+        response = qdrant.query_points(
+            collection_name=COLLECTION_NAME,
+            query=vector,
+            limit=5,
+            with_payload=True
+        )
+        search_results = response.points
+        
+        # Map to BusinessRuleResponse
+        rules = []
+        for hit in search_results:
+            payload = hit.payload
+            rules.append(BusinessRuleResponse(
+                id=str(hit.id),
+                tu_khoa=payload.get("tu_khoa", ""),
+                dinh_nghia_sql_logic=payload.get("dinh_nghia_sql_logic", ""),
+                updated_at=payload.get("updated_at", "2024-01-01T00:00:00")
+            ))
+        return rules
+    except Exception as e:
+        logger.error(f"Search failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/knowledge", response_model=list[BusinessRuleResponse])
 async def list_knowledge_rules():
     async with get_internal_db_context() as db:
@@ -72,7 +105,6 @@ async def create_knowledge_rule(rule_in: BusinessRuleCreate):
             ensure_collection(qdrant)
             embeddings = get_embeddings()
             
-            # Khác schema_agent, ở đây ta sẽ dùng embed tu_khoa nhưng cũng có thể nối thêm chút định nghĩa
             embed_text = f"Nghiệp vụ: {new_rule.tu_khoa}. Định nghĩa: {new_rule.dinh_nghia_sql_logic}"
             vector = embeddings.embed_query(embed_text)
 
@@ -81,14 +113,14 @@ async def create_knowledge_rule(rule_in: BusinessRuleCreate):
                 vector=vector,
                 payload={
                     "tu_khoa": new_rule.tu_khoa,
-                    "dinh_nghia_sql_logic": new_rule.dinh_nghia_sql_logic
+                    "dinh_nghia_sql_logic": new_rule.dinh_nghia_sql_logic,
+                    "updated_at": new_rule.updated_at.isoformat() if hasattr(new_rule, 'updated_at') else None
                 }
             )
             qdrant.upsert(collection_name=COLLECTION_NAME, points=[point])
             logger.info(f"Upserted rule {new_rule.id} to Qdrant")
         except Exception as e:
             logger.error(f"Failed to upsert to Qdrant: {e}")
-            # Consider returning a specific warning if DB succeeds but Qdrant fails
 
         return new_rule
 
@@ -123,7 +155,8 @@ async def update_knowledge_rule(rule_in: BusinessRuleUpdate, rule_id: str = Path
                 vector=vector,
                 payload={
                     "tu_khoa": rule.tu_khoa,
-                    "dinh_nghia_sql_logic": rule.dinh_nghia_sql_logic
+                    "dinh_nghia_sql_logic": rule.dinh_nghia_sql_logic,
+                    "updated_at": rule.updated_at.isoformat() if hasattr(rule, 'updated_at') else None
                 }
             )
             qdrant.upsert(collection_name=COLLECTION_NAME, points=[point])

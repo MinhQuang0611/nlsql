@@ -68,3 +68,4 @@ wren-ui/db.sqlite3
 wren-ui/coverage/
 wren-ui/.turbo/
 wren-ui/.vercel/
+deploy_config.zip

@@ -87,8 +87,12 @@ def create_app() -> FastAPI:
     from api.routers.tables import router as tables_router
     from api.routers.chart import router as chart_router
     from api.routers.knowledge import router as knowledge_router
+    from api.routers.faq import router as faq_router
     app.include_router(chat_router, prefix="/api/v1")
     app.include_router(tables_router, prefix="/api/v1")
+    app.include_router(chart_router, prefix="/api/v1")
+    app.include_router(knowledge_router, prefix="/api/v1")
+    app.include_router(faq_router, prefix="/api/v1")
     app.include_router(chart_router, prefix="/api/v1")
     app.include_router(knowledge_router, prefix="/api/v1")
 
@@ -101,6 +105,15 @@ def create_app() -> FastAPI:
     @app.get("/chat", include_in_schema=False)
     async def chat_page():
         return FileResponse(os.path.join(static_dir, "chat.html"))
+
+    @app.get("/manage_knowledge", include_in_schema=False)
+    async def manage_knowledge_page():
+        return FileResponse(os.path.join(static_dir, "manage_knowledge.html"))
+
+    @app.get("/manage_faq", include_in_schema=False)
+    async def manage_faq_page():
+        return FileResponse(os.path.join(static_dir, "manage_faq.html"))
+
 
 
 

@@ -1,0 +1,71 @@
+x-common: &common
+  restart: always
+  env_file:
+    - .env
+
+services:
+  app:
+    image: registry.gitlab.aisoftech.vn/dungdq/text2dashboard
+    container_name: nlsql_app_prod
+    <<: *common
+    ports:
+      - "8388:8388"
+    command: [ "/app/entrypoint.sh" ]
+    depends_on:
+      qdrant:
+        condition: service_started
+      redis:
+        condition: service_started
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16
+    container_name: nlsql_postgres_prod
+    <<: *common
+    volumes:
+      - mount-data:/var/lib/postgresql/data
+    ports:
+      - "8389:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}" ]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+
+  wren-ui:
+    build:
+      context: ./wren-ui
+      dockerfile: Dockerfile.dev
+    container_name: nlsql_wren_ui_prod
+    <<: *common
+    volumes:
+      - ./wren-ui:/app
+      - /app/node_modules
+      - /app/.next
+    ports:
+      - "3003:3000"
+    environment:
+      - WREN_ENGINE_URL=http://app:8388
+    depends_on:
+      - app
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: nlsql_qdrant_prod
+    restart: always
+    ports:
+      - "${QDRANT_EXTERNAL_PORT:-63332}:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  redis:
+    image: redis:alpine
+    container_name: nlsql_redis_prod
+    restart: always
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+
+volumes:
+  mount-data:
+  qdrant_data:

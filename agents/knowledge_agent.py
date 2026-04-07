@@ -29,7 +29,7 @@ _SCORE_THRESHOLD = 0.01   # knowledge docs thường ít chi tiết kỹ thuật
 
 _llm = ChatOpenAI(
     model=settings.openai_model,
-    temperature=0,
+    temperature=settings.llm_temperature,
     api_key=settings.openai_api_key,
 )
 
@@ -47,7 +47,7 @@ def _get_embeddings() -> OpenAIEmbeddings:
     )
 
 
-def _search_knowledge(user_query: str) -> str:
+def _search_knowledge(user_query: str) -> tuple[str, list[dict]]:
     """Tìm kiếm tài liệu kiến thức liên quan trong Qdrant."""
     try:
         qdrant = _get_qdrant()
@@ -61,7 +61,7 @@ def _search_knowledge(user_query: str) -> str:
                 "Hãy chạy script index_knowledge.py để tạo.",
                 _KNOWLEDGE_COLLECTION,
             )
-            return ""
+            return "", []
 
         vector = embeddings.embed_query(user_query)
         response = qdrant.query_points(
@@ -73,28 +73,52 @@ def _search_knowledge(user_query: str) -> str:
         hits = response.points
 
         chunks: list[str] = []
+        business_rules: list[dict] = []
+        
         for hit in hits:
             if not hit.payload:
                 continue
             score = hit.score if hasattr(hit, "score") else 0.0
             if score < _SCORE_THRESHOLD:
                 continue
-            content = hit.payload.get("content") or hit.payload.get("text") or ""
-            source = hit.payload.get("source", "")
-            if content:
-                header = f"[Nguồn: {source}]" if source else ""
-                chunks.append(f"{header}\n{content}".strip())
+            
+            payload = hit.payload
+            
+            # --- Trường hợp 1: Dữ liệu từ Business Rule (API/Dashboard) ---
+            if "tu_khoa" in payload and "dinh_nghia_sql_logic" in payload:
+                tu_khoa = payload["tu_khoa"]
+                logic = payload["dinh_nghia_sql_logic"]
+                chunks.append(f"[Quy tắc nghiệp vụ: {tu_khoa}]\n{logic}")
+                business_rules.append({
+                    "id": str(hit.id),
+                    "tu_khoa": tu_khoa,
+                    "dinh_nghia_sql_logic": logic
+                })
+            
+            # --- Trường hợp 2: Dữ liệu từ Google Sheet (Văn bản thuần) ---
+            else:
+                content = payload.get("content") or payload.get("text") or payload.get("title") or ""
+                source = payload.get("source", "")
+                if content:
+                    header = f"[Nguồn: {source}]" if source else ""
+                    chunks.append(f"{header}\n{content}".strip())
+                    # Thêm vào business_rules nhưng dùng content làm logic để sql_plan_agent vẫn thấy
+                    business_rules.append({
+                        "id": str(hit.id),
+                        "tu_khoa": payload.get("title") or source or "Kiến thức bổ trợ",
+                        "dinh_nghia_sql_logic": content
+                    })
 
         if chunks:
             logger.info("[KnowledgeAgent] Tìm được %d chunks liên quan.", len(chunks))
-            return "\n\n---\n\n".join(chunks)
+            return "\n\n---\n\n".join(chunks), business_rules
 
         logger.info("[KnowledgeAgent] Không tìm thấy tài liệu đủ điểm (threshold=%.2f).", _SCORE_THRESHOLD)
-        return ""
+        return "", []
 
     except Exception as exc:
         logger.warning("[KnowledgeAgent] Qdrant search thất bại: %s", exc)
-        return ""
+        return "", []
 
 
 async def knowledge_agent(state: AgentState) -> AgentState:
@@ -103,6 +127,7 @@ async def knowledge_agent(state: AgentState) -> AgentState:
 
     - Với intent = knowledge_query: tìm ngữ cảnh + sinh câu trả lời ngay.
     - Với intent = domain_query:    chỉ tìm ngữ cảnh, để DB pipeline + domain_answer_agent tổng hợp.
+    - Với intent = data_query:      chỉ tìm ngữ cảnh bổ trợ cho SQL generation.
     """
     user_query = state.get("user_query", "")
     intent = state.get("intent", "")
@@ -110,7 +135,7 @@ async def knowledge_agent(state: AgentState) -> AgentState:
 
     logger.info("[KnowledgeAgent] query=%r intent=%s", user_query, intent)
 
-    knowledge_context = _search_knowledge(user_query)
+    knowledge_context, business_rules = _search_knowledge(user_query)
 
     # ── knowledge_query: dừng tại đây, trả lời ngay từ tài liệu ──────────
     if intent == "knowledge_query":
@@ -120,8 +145,8 @@ async def knowledge_agent(state: AgentState) -> AgentState:
                 "Bạn vui lòng liên hệ bộ phận chức năng để được hỗ trợ thêm."
             )
             return {
-                **state,
                 "knowledge_context": "",
+                "business_context": [],
                 "answer": answer,
                 "answer_format": "text",
             }
@@ -153,15 +178,15 @@ async def knowledge_agent(state: AgentState) -> AgentState:
 
         logger.info("[KnowledgeAgent] knowledge_query answered.")
         return {
-            **state,
             "knowledge_context": knowledge_context,
+            "business_context": business_rules,
             "answer": answer,
             "answer_format": answer_format,
         }
 
-    # ── domain_query: chỉ lưu context, để DB pipeline chạy tiếp ─────────
-    logger.info("[KnowledgeAgent] domain_query — lưu knowledge_context, tiếp tục DB pipeline.")
+    # ── domain_query / data_query: lưu context, tiếp tục DB pipeline ─────────
+    logger.info("[KnowledgeAgent] %s — lưu knowledge_context & business_context, tiếp tục DB pipeline.", intent)
     return {
-        **state,
         "knowledge_context": knowledge_context,
+        "business_context": business_rules,
     }

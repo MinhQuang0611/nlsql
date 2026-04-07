@@ -11,7 +11,7 @@ else
 fi
 
 if [ "$APP_ENV" = "development" ]; then
-  uvicorn main:app --host 0.0.0.0 --port 8388 --reload
+  uvicorn main:app --host "${APP_HOST:-0.0.0.0}" --port "${APP_PORT:-8388}" --reload
 else
-  uvicorn main:app --host 0.0.0.0 --port 8388 --workers 2
+  uvicorn main:app --host "${APP_HOST:-0.0.0.0}" --port "${APP_PORT:-8388}" --workers 2
 fi

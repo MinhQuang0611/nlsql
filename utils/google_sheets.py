@@ -5,10 +5,14 @@ import logging
 from google.oauth2.service_account import Credentials
 import asyncio
 
+from config import get_settings
+
+settings = get_settings()
+
 logger = logging.getLogger(__name__)
 
 # Config
-CREDENTIALS_FILE = os.path.join(os.path.dirname(__file__), "ascendant-nova-478100-q0-a825170022ba.json")
+CREDENTIALS_FILE = os.path.abspath(settings.google_sheets_credentials_file)
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"

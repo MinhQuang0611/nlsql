@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 _llm = ChatOpenAI(
-    model=settings.openai_model,
-    temperature=0.7,
+    model=settings.recommend_model,
+    temperature=settings.recommend_temperature,
     api_key=settings.openai_api_key,
 )
 

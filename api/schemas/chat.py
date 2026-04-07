@@ -5,6 +5,9 @@ from pydantic import BaseModel, Field
 class HistoryMessage(BaseModel):
     role: str = Field(..., description="Vai trò: 'user' hoặc 'assistant'")
     content: str = Field(..., description="Nội dung tin nhắn")
+    intent: Optional[str] = Field(None, description="Ý định của tin nhắn trợ lý")
+    sql: Optional[str] = Field(None, description="Câu lệnh SQL đã chạy")
+    data: Optional[list[dict]] = Field(None, description="Dữ liệu kết quả")
 
 
 class ChatRequest(BaseModel):

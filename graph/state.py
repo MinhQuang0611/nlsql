@@ -51,7 +51,8 @@ class AgentState(TypedDict, total=False):
         "schema_question",
         "greeting",
         "out_of_scope",      
-        "ambiguous",         
+        "ambiguous",
+        "faq_answered",
     ]
     intent_reasoning: str            
 
@@ -85,6 +86,7 @@ class AgentState(TypedDict, total=False):
     history: list[dict]                      # Lịch sử hội thoại [{"role": "user/assistant", "content": "..."}]
     knowledge_context: Optional[str]         # Kết quả RAG từ Knowledge Agent (dùng cho domain_query / knowledge_query)
     clarification_question: Optional[str]  # Câu hỏi làm rõ khi intent là ambiguous
+    recommend_questions: Optional[list[str]] # Các gợi ý câu hỏi liên quan (VD: FAQ gần nhất)
 
     answer: str                      
     answer_format: Literal["text", "table", "chart+text"]

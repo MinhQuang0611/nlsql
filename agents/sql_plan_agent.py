@@ -5,14 +5,14 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from config import get_settings
 from graph.state import AgentState, TableSchema
 from prompts.sql_plan import SQL_PLAN_SYSTEM, SQL_PLAN_HUMAN
-from agents.intent_agent import _format_history
+from utils.chat_history import format_history
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
 _llm = ChatOpenAI(
     model=settings.openai_model,
-    temperature=0,
+    temperature=settings.llm_temperature,
     api_key=settings.openai_api_key,
 )
 
@@ -80,7 +80,7 @@ async def sql_plan_agent(state: AgentState) -> AgentState:
     user_query = state.get("user_query", "")
     schema_context = state.get("schema_context", [])
     history = state.get("history", [])
-    history_text = _format_history(history)
+    history_text = format_history(history)
     
     if not schema_context:
         logger.warning("[SQLPlanAgent] No schemas available. Skipping plan.")

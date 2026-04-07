@@ -167,24 +167,34 @@ async def init_internal_db() -> None:
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg_pool import AsyncConnectionPool
 
+_checkpoint_saver: AsyncPostgresSaver | None = None
+_checkpoint_pool: AsyncConnectionPool | None = None
+
 @asynccontextmanager
 async def get_checkpoint_saver() -> AsyncGenerator[AsyncPostgresSaver, None]:
     """
-    Tạo context manager cho AsyncPostgresSaver.
-    Sử dụng internal database (Postgres).
+    Trả về AsyncPostgresSaver (Singleton).
     """
-    # Xây dựng connection string cho psycopg (v3)
-    from urllib.parse import quote_plus
-    conn_str = (
-        f"postgresql://{settings.postgres_user}:{quote_plus(settings.postgres_password)}"
-        f"@{settings.postgres_host}:{settings.postgres_port}/{settings.postgres_db}"
-        f"?sslmode=disable"
-    )
+    global _checkpoint_saver, _checkpoint_pool
+    if _checkpoint_saver is None:
+        from urllib.parse import quote_plus
+        conn_str = (
+            f"postgresql://{settings.postgres_user}:{quote_plus(settings.postgres_password)}"
+            f"@{settings.postgres_host}:{settings.postgres_port}/{settings.postgres_db}"
+            f"?sslmode=disable"
+        )
+        _checkpoint_pool = AsyncConnectionPool(conn_str, max_size=settings.db_pool_size, open=False)
+        await _checkpoint_pool.open()
+        _checkpoint_saver = AsyncPostgresSaver(_checkpoint_pool)
+        # Note: setup() nên được gọi ở init_internal_db
     
-    async with AsyncConnectionPool(conn_str, max_size=settings.db_pool_size) as pool:
-        checkpointer = AsyncPostgresSaver(pool)
-        # Bỏ qua await checkpointer.setup() ở đây vì đã chạy trong init_internal_db() lúc khởi động
-        yield checkpointer
+    yield _checkpoint_saver
+
+async def close_checkpoint_pool() -> None:
+    global _checkpoint_pool
+    if _checkpoint_pool:
+        await _checkpoint_pool.close()
+        _checkpoint_pool = None
 
 # ---------------------------------------------------------------------------
 # Khởi tạo engine theo active_db
@@ -346,7 +356,8 @@ async def init_db() -> None:
 
 async def close_db() -> None:
     await internal_engine.dispose()
-    logger.info("Đã đóng kết nối Internal Postgres")
+    await close_checkpoint_pool()
+    logger.info("Đã đóng kết nối Internal Postgres và Checkpoint Pool")
 
     if settings.active_db == "clickhouse":
         for domain, eng in _sync_engines.items():

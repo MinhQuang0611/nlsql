@@ -29,7 +29,7 @@ _SCORE_THRESHOLD = 0.01   # knowledge docs thường ít chi tiết kỹ thuật
 
 _llm = ChatOpenAI(
     model=settings.openai_model,
-    temperature=0,
+    temperature=settings.llm_temperature,
     api_key=settings.openai_api_key,
 )
 
@@ -145,7 +145,6 @@ async def knowledge_agent(state: AgentState) -> AgentState:
                 "Bạn vui lòng liên hệ bộ phận chức năng để được hỗ trợ thêm."
             )
             return {
-                **state,
                 "knowledge_context": "",
                 "business_context": [],
                 "answer": answer,
@@ -179,7 +178,6 @@ async def knowledge_agent(state: AgentState) -> AgentState:
 
         logger.info("[KnowledgeAgent] knowledge_query answered.")
         return {
-            **state,
             "knowledge_context": knowledge_context,
             "business_context": business_rules,
             "answer": answer,
@@ -189,7 +187,6 @@ async def knowledge_agent(state: AgentState) -> AgentState:
     # ── domain_query / data_query: lưu context, tiếp tục DB pipeline ─────────
     logger.info("[KnowledgeAgent] %s — lưu knowledge_context & business_context, tiếp tục DB pipeline.", intent)
     return {
-        **state,
         "knowledge_context": knowledge_context,
         "business_context": business_rules,
     }

@@ -13,43 +13,38 @@ from agents.executor_agent import executor_agent
 from agents.chart_agent import chart_agent
 from agents.answer_agent import answer_agent
 from agents.clarification_agent import clarification_agent
-
+from agents.faq_agent import faq_agent
 
 logger = logging.getLogger(__name__)
 
-
-def route_after_intent(state: AgentState) -> str:
+def route_after_faq(state: AgentState) -> str:
     intent = state.get("intent")
-    if intent in ("data_query", "chart_request", "schema_question"):
+    if intent == "faq_answered":
+        return "answer"  # Hoặc trực tiếp END tuỳ thiết kế, ở đây chuyển về answer để answer_agent pass thẳng hoặc in ra format tuỳ ý. Chờ duyệt log answer_agent
+        # Nhưng theo logic answer_agent, nếu intent lạ nó sẽ sinh answer lỗi. Ghi đè.
+        # Ở đây FAQAgent đã gán state['answer']. Ta có thể End luôn
+        return END
+    return "intent"
+
+def route_after_intent(state: AgentState) -> str | list[str]:
+    intent = state.get("intent")
+    if intent == "domain_query":
+        return ["schema", "knowledge"]
+    if intent == "data_query" or intent == "chart_request":
+        return ["schema", "knowledge"]
+    if intent == "schema_question":
         return "schema"
-    if intent in ("domain_query", "knowledge_query"):
+    if intent == "knowledge_query":
         return "knowledge"
     if intent == "ambiguous":
         return "clarification"
     return "answer"  # greeting, out_of_scope
 
-
-def route_after_knowledge(state: AgentState) -> str:
-    """
-    - knowledge_query: Knowledge Agent đã sinh answer → kết thúc ngay
-    - domain_query:    chỉ lưu context → tiếp tục DB pipeline (schema → sql_plan ...)
-    - data_query/chart_request: chạy qua schema rồi tới knowledge, nên sau knowledge là sql_plan
-    """
+def route_after_retrieval(state: AgentState) -> str:
     intent = state.get("intent")
-    if intent == "knowledge_query":
+    if intent == "knowledge_query" or intent == "schema_question":
         return "answer"
-    if intent == "domain_query":
-        return "schema"
     return "sql_plan"
-
-
-def route_after_schema(state: AgentState) -> str:
-    intent = state.get("intent")
-    if intent == "schema_question":
-        return "answer"
-    if intent == "domain_query":
-        return "sql_plan"
-    return "knowledge"
 
 
 def route_after_sql_check(state: AgentState) -> str:
@@ -66,31 +61,35 @@ def route_after_sql_check(state: AgentState) -> str:
 
 
 def build_graph(checkpointer: Any = None) -> Any:
-
     def inc_retry(state: AgentState) -> dict:
         return {"retry_count": state.get("retry_count", 0) + 1}
 
     builder = StateGraph(AgentState)
 
-    # ── Nodes ───────────────────────────────────────────────────────────────
+    builder.add_node("faq", faq_agent)
     builder.add_node("intent", intent_agent)
-    builder.add_node("knowledge", knowledge_agent)   # Knowledge / Domain RAG
+    builder.add_node("knowledge", knowledge_agent)
     builder.add_node("schema", schema_agent)
-    
     builder.add_node("sql_plan", sql_plan_agent)
     builder.add_node("sql_gen", sql_gen_agent)
     builder.add_node("sql_check", sql_check_agent)
     builder.add_node("inc_retry", inc_retry)
-
     builder.add_node("execute", executor_agent)
     builder.add_node("chart", chart_agent)
     builder.add_node("answer", answer_agent)
     builder.add_node("clarification", clarification_agent)
 
-    # ── Edges ────────────────────────────────────────────────────────────────
-    builder.add_edge(START, "intent")
+    builder.add_edge(START, "faq")
 
-    # intent → {schema | knowledge | answer | clarification}
+    builder.add_conditional_edges(
+        "faq",
+        route_after_faq,
+        {
+            "intent": "intent",
+            END: END,
+        }
+    )
+
     builder.add_conditional_edges(
         "intent",
         route_after_intent,
@@ -102,23 +101,15 @@ def build_graph(checkpointer: Any = None) -> Any:
         }
     )
 
-    # knowledge → {answer (knowledge_query) | schema (domain_query) | sql_plan}
-    builder.add_conditional_edges(
-        "knowledge",
-        route_after_knowledge,
-        {
-            "answer": "answer",
-            "schema": "schema",
-            "sql_plan": "sql_plan",
-        }
-    )
+    # Join point for parallel retrieval
+    builder.add_node("retrieval_join", lambda state: state)
+    builder.add_edge("schema", "retrieval_join")
+    builder.add_edge("knowledge", "retrieval_join")
 
-    # schema → {sql_plan | answer (schema_question) | knowledge}
     builder.add_conditional_edges(
-        "schema",
-        route_after_schema,
+        "retrieval_join",
+        route_after_retrieval,
         {
-            "knowledge": "knowledge",
             "answer": "answer",
             "sql_plan": "sql_plan",
         }
@@ -143,3 +134,16 @@ def build_graph(checkpointer: Any = None) -> Any:
 
     app = builder.compile(checkpointer=checkpointer)
     return app
+
+
+_cached_app = None
+
+def get_graph_app(checkpointer: Any = None) -> Any:
+    """
+    Returns a singleton instance of the compiled graph.
+    """
+    global _cached_app
+    if _cached_app is None:
+        _cached_app = build_graph(checkpointer=checkpointer)
+    return _cached_app
+

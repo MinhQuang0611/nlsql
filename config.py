@@ -59,10 +59,24 @@ class Settings(BaseSettings):
     db_pool_timeout: int = 30
     db_echo: bool = False
 
+    # LLM - OpenAI
     openai_api_key: str = ""
-    openai_model: str = "gpt-5.4-mini"
-    sql_gen_model: str = "gpt-5.4"
-    embedding_model:str = "text-embedding-3-small"
+    openai_base_url: str = "https://api.openai.com/v1"
+
+    # Per-agent model configuration
+    openai_model: str = "gpt-4o-mini"        # intent, answer, chart, knowledge, schema, sql_check, sql_plan agents
+    sql_gen_model: str = "gpt-4o-mini"       # sql_gen agent (có thể dùng model mạnh hơn)
+    recommend_model: str = "gpt-4o-mini"     # recommend utility
+
+    # LLM parameters
+    llm_temperature: float = 0.0             # default temperature cho deterministic agents
+    recommend_temperature: float = 0.7       # temperature cho recommend (cho phép sáng tạo hơn)
+    llm_max_tokens: int = 4096
+    llm_timeout: int = 60                    # seconds
+
+    # Embedding
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dimensions: int = 1536
 
     PREDEFINED_FORMULAS: dict[str, str] = {
         "ty_le_dat": "ROUND((SUM(CASE WHEN diem >= 4.0 THEN 1 ELSE 0 END) * 100.0) / COUNT(*), 2)",
@@ -82,14 +96,23 @@ class Settings(BaseSettings):
     langchain_project: str = "nlsql"
 
     app_env: str = "development"
+    app_host: str = "0.0.0.0"
+    app_port: int = 8388
     log_level: str = "INFO"
 
+    qdrant_host: str = "localhost"
+    qdrant_port: int = 63332
     qdrant_url: str = "http://localhost:63332"
     qdrant_api_key: str | None = None
     
+    redis_host: str = "localhost"
+    redis_port: int = 6379
     redis_url: str = "redis://localhost:6379"
 
     google_sheet_url: str = ""
+    google_sheets_credentials_file: str = "utils/ascendant-nova-478100-q0-a825170022ba.json"
+    sheets_knowledge_id: str = "1zQAKdpIWs_rDo5E-8yYQ-u3bf-iO2QMyCSxHMMA-PNE"
+    sheets_knowledge_name: str = "Trang tính 1"
 
 
     # Config cho DataBase Postgres

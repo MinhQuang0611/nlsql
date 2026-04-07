@@ -1,16 +1,15 @@
+x-common: &common
+  restart: always
+  env_file:
+    - .env
+
 services:
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: nlsql_app
-    restart: always
-    env_file:
-      - .env
-    volumes:
-      - .:/app
+    image: registry.gitlab.aisoftech.vn/dungdq/text2dashboard
+    container_name: nlsql_app_prod
+    <<: *common
     ports:
-      - "${APP_PORT:-8388}:${APP_PORT:-8388}"
+      - "8388:8388"
     command: [ "/app/entrypoint.sh" ]
     depends_on:
       qdrant:
@@ -22,14 +21,12 @@ services:
 
   db:
     image: postgres:16
-    container_name: nlsql_postgres
-    restart: always
-    env_file:
-      - .env
+    container_name: nlsql_postgres_prod
+    <<: *common
     volumes:
-      - ./postgres_data:/var/lib/postgresql/data
+      - mount-data:/var/lib/postgresql/data
     ports:
-      - "${POSTGRES_EXTERNAL_PORT:-8389}:5432"
+      - "8389:5432"
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}" ]
       interval: 30s
@@ -40,32 +37,35 @@ services:
     build:
       context: ./wren-ui
       dockerfile: Dockerfile.dev
-    container_name: nlsql_wren_ui
-    restart: always
+    container_name: nlsql_wren_ui_prod
+    <<: *common
     volumes:
       - ./wren-ui:/app
       - /app/node_modules
       - /app/.next
     ports:
-      - "${WREN_UI_PORT:-3003}:3000"
+      - "3003:3000"
     environment:
-      - WREN_ENGINE_URL=http://app:${APP_PORT:-8388}
+      - WREN_ENGINE_URL=http://app:8388
     depends_on:
       - app
 
   qdrant:
     image: qdrant/qdrant:latest
-    container_name: nlsql_qdrant
+    container_name: nlsql_qdrant_prod
+    restart: always
     ports:
-      - "${QDRANT_EXTERNAL_PORT:-63332}:6333"
+      - "63332:6333"
     volumes:
       - qdrant_data:/qdrant/storage
 
   redis:
     image: redis:alpine
-    container_name: nlsql_redis
+    container_name: nlsql_redis_prod
+    restart: always
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "6379:6379"
 
 volumes:
+  mount-data:
   qdrant_data:

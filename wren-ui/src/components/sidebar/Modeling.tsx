@@ -21,6 +21,7 @@ export interface Props {
   data: Diagram;
   onOpenModelDrawer: () => void;
   onSelect: (selectKeys) => void;
+  collapsed?: boolean;
 }
 
 export default function Modeling(props: Props) {

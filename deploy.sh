@@ -21,6 +21,9 @@ if [ -f "$CONFIG_ZIP" ]; then
     if [ -f "$CONFIG_DIR/config.py" ]; then
         cp "$CONFIG_DIR/config.py" config.py
     fi
+    if [ -f "$CONFIG_DIR/QLDT_FINAL.xlsx" ]; then
+        cp "$CONFIG_DIR/QLDT_FINAL.xlsx" QLDT_FINAL.xlsx
+    fi
     
     # Optional: Clean up unzipped folder
     # rm -rf "$CONFIG_DIR"

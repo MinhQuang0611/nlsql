@@ -55,7 +55,7 @@ services:
     container_name: nlsql_qdrant_prod
     restart: always
     ports:
-      - "63332:6333"
+      - "${QDRANT_EXTERNAL_PORT:-63332}:6333"
     volumes:
       - qdrant_data:/qdrant/storage
 
@@ -64,7 +64,7 @@ services:
     container_name: nlsql_redis_prod
     restart: always
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
 
 volumes:
   mount-data:

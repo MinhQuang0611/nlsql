@@ -29,7 +29,7 @@ _SCORE_THRESHOLD = 0.01   # knowledge docs thường ít chi tiết kỹ thuật
 
 _llm = ChatOpenAI(
     model=settings.openai_model,
-    temperature=0,
+    temperature=settings.llm_temperature,
     api_key=settings.openai_api_key,
 )
 

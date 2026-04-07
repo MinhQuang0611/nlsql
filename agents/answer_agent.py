@@ -17,7 +17,7 @@ settings = get_settings()
 
 _llm = ChatOpenAI(
     model=settings.openai_model,
-    temperature=0,  # Phải là 0 để đảm bảo kết quả deterministc, tránh số liệu bị diễn giải khác nhau
+    temperature=settings.llm_temperature,
     api_key=settings.openai_api_key,
 )
 

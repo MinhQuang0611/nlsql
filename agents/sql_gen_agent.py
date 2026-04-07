@@ -17,7 +17,7 @@ settings = get_settings()
 
 _llm = ChatOpenAI(
     model=settings.sql_gen_model,
-    temperature=0,
+    temperature=settings.llm_temperature,
     api_key=settings.openai_api_key,
 )
 

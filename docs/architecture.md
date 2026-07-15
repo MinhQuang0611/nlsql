@@ -55,30 +55,61 @@ graph TD
 
 ---
 
-## 2. Mô tả Chi tiết các Agent
+## 2. Mô tả Chi tiết xử lý tại các Agent (Node)
 
-### 2.1. FAQ Agent (Cổng ưu tiên)
-- **Nhiệm vụ**: Kiểm tra xem câu hỏi có nằm trong bộ FAQ (Frequently Asked Questions) đã được biên soạn sẵn hay không.
-- **Công nghệ**: Sử dụng Vector Search (Qdrant) với ngưỡng tương đồng (Threshold) là **0.7**.
-- **Kết quả**: Nếu trúng, hệ thống trả về kết quả ngay lập tức (Bypass qua các Agent khác), giúp tốc độ phản hồi cực nhanh.
+Quá trình điều phối luồng xử lý do hệ thống LangGraph đảm nhận. Tại mỗi node (tương ứng một Agent), hệ thống sẽ nhận đầu vào là trạng thái chung (`AgentState`), thực hiện các thao tác chuyên biệt và trả về các thay đổi (delta) để cập nhật vào State rồi chuyển cho node tiếp theo. Dưới đây là chi tiết công việc tại từng node:
 
-### 2.2. Intent Agent (Chuyên gia phân tích ý định)
-- **Nhiệm vụ**: Phân tích câu hỏi của người dùng để quyết định hướng đi tiếp theo.
-- **Các loại ý định**:
-    - `data_query`: Truy vấn số liệu từ database.
-    - `knowledge_query`: Hỏi về quy định, chính sách, hoặc định nghĩa nghiệp vụ.
-    - `domain_query`: Câu hỏi phức tạp cần kết hợp cả database và quy định nghiệp vụ.
-    - `ambiguous`: Câu hỏi chưa rõ ràng, cần hỏi lại người dùng.
-    - `greeting` / `out_of_scope`: Chào hỏi hoặc câu hỏi ngoài phạm vi.
+### 2.1. FAQ Agent (faq_agent)
+- **Đầu vào chính**: `user_query`.
+- **Nhiệm vụ**: Tìm kiếm câu trả lời nhanh từ cơ sở dữ liệu các câu hỏi thường gặp (Qdrant semantic search). 
+- **Kết quả / Cập nhật**: 
+  - Nếu kết quả tìm kiếm có độ tương đồng `> 0.7`: cập nhật `intent` thành `faq_answered`, gắn câu trả lời vào `answer`, lưu vào danh sách `recommend_questions`. Graph sẽ **Bypass** thẳng đến khối hoàn tất (END).
+  - Nếu không trúng: Không thay đổi state và truyền thẳng sang `intent_agent`.
 
-### 2.3. Knowledge & Schema Agents (Ngữ cảnh nghiệp vụ & Dữ liệu)
-- **Knowledge Agent**: Tìm kiếm các quy định nghiệp vụ (Business Rules) trong Qdrant để bổ trợ cho việc viết SQL hoặc trả lời trực tiếp.
-- **Schema Agent**: Xác định các bảng và cột dữ liệu liên quan nhất đến câu hỏi.
+### 2.2. Intent Agent (intent_agent)
+- **Đầu vào chính**: `user_query`, `history`.
+- **Nhiệm vụ**: Gọi LLM (OpenAI) để phân loại ý định cốt lõi của người dùng để định tuyến.
+- **Kết quả / Cập nhật**:
+  - Gán `intent` thuộc 1 trong các nhóm: `data_query`, `chart_request`, `schema_question`, `knowledge_query`, `domain_query`, `ambiguous`, `greeting`, `out_of_scope`.
+  - Nếu `intent` là `ambiguous` (không rõ ràng), sinh thêm câu hỏi và gán vào `clarification_question`.
 
-### 2.4. SQL Gen Pipeline (Plan -> Gen -> Check)
-- **SQL Plan Agent**: Lập kế hoạch truy vấn (ví dụ: cần Join bảng nào, Filter điều kiện gì) bằng ngôn ngữ tự nhiên.
-- **SQL Gen Agent**: Chuyển kế hoạch thành câu lệnh SQL thực tế (PostgreSQL/ClickHouse).
-- **SQL Check Agent**: Kiểm tra lỗi cú pháp và logic. Nếu sai, Agent này sẽ gửi phản hồi kèm lỗi để `SQL Gen Agent` sửa lại (tối đa 3 lần).
+### 2.3. Schema Agent (schema_agent)
+- **Đầu vào chính**: `user_query`, `selected_tables` (tùy chọn theo context).
+- **Nhiệm vụ**: Dùng Vector Search (trên các index schema của bảng) để tìm ra các bảng phục vụ truy vấn. Nếu tìm được < 2 bảng, dùng thêm LLM Fallback quét danh sách full table.
+- **Kết quả / Cập nhật**: Trả về `relevant_tables` (danh sách tên bảng) và `schema_context` (chứa siêu dữ liệu bảng như mô tả, foreign keys, columns data type và mẫu data 3 dòng).
+
+### 2.4. Knowledge Agent (knowledge_agent)
+- **Đầu vào chính**: `user_query`.
+- **Nhiệm vụ**: Vector search bóc tách các quy định, công thức tính toán hoặc rule đặc thù của doanh nghiệp đối với domain hiện tại.
+- **Kết quả / Cập nhật**: Gán kết quả tìm được vào `knowledge_context`. Dữ liệu này dùng để nối vào hệ thống prompt sinh SQL sau này.
+
+### 2.5. SQL Plan Agent (sql_plan_agent)
+- **Đầu vào chính**: `user_query`, `schema_context`, `knowledge_context`.
+- **Nhiệm vụ**: "Think step-by-step". LLM lên một phác thảo thuật toán tư duy viết SQL tự nhiên: cần chọn gì, join bảng nào, lọc điều kiện gì.
+- **Kết quả / Cập nhật**: Gán vào trường `query_plan`.
+
+### 2.6. SQL Gen Agent (sql_gen_agent)
+- **Đầu vào chính**: `query_plan`, `schema_context`, phản hồi sửa lỗi `sql_correction` (nếu đang trong vòng lặp retry).
+- **Nhiệm vụ**: Translate các kế hoạch và quy định thành câu lệnh SQL Postgres/ClickHouse chuẩn xác.
+- **Kết quả / Cập nhật**: Gán nội dung vào `generated_sql`, dự kiến `final_sql` ban đầu, và `sql_reasoning` (giải thích cho việc dùng câu SQL này).
+
+### 2.7. SQL Check Agent (sql_check_agent)
+- **Đầu vào chính**: `generated_sql`.
+- **Nhiệm vụ**: Kiểm thử tính tương thích (cú pháp, các bảng hoặc hàm tồn tại).
+- **Kết quả / Cập nhật**: Gán vào `sql_correction` (`is_valid`, `issues`). Nếu `is_valid` = False, luồng Node tự động chuyển sang Node `inc_retry` (để tăng `retry_count`) và lặp lại Node `sql_gen` (giới hạn 3 lần thử lại).
+
+### 2.8. Executor Agent (executor_agent)
+- **Đầu vào chính**: `final_sql`.
+- **Nhiệm vụ**: Thực thi an toàn câu truy vấn trên SQL Engine.
+- **Kết quả / Cập nhật**: Gán bảng kết quả dạng JSON vào `query_result`, số lượng bản ghi vào `row_count`, cũng như `execution_time_ms` tính toán. Nếu lỗi, lưu chi tiết vào `executor_error`.
+
+### 2.9. Chart Agent (chart_agent)
+- **Đầu vào chính**: `query_result`, `intent`.
+- **Nhiệm vụ**: Nếu Intent yêu cầu sinh biểu đồ hoặc dữ liệu phù hợp để visualize, Agent gợi ý cấu hình biểu đồ (Line, Bar, Pie...) và format trục tọa độ.
+- **Kết quả / Cập nhật**: Tạo và lưu object render vào `chart_config` và `chart_data`.
+
+### 2.10. Answer & Clarification Agents
+- **Nhiệm vụ**: Trả về dữ liệu đóng gói cuối cùng. `answer_agent` đóng văn bản trả lời dựa vào Result hoặc Fallback error. `clarification_agent` hỏi ngược lại nếu intent thiếu.
 
 ---
 
@@ -110,15 +141,40 @@ graph TD
 
 ---
 
-## 4. Quản lý Trạng thái (State Management)
+## 4. Quản lý Trạng thái Khối Dữ liệu (State Management)
 
-Hệ thống sử dụng `AgentState` để truyền thông tin giữa các Agent:
-- `user_query`: Câu hỏi gốc của người dùng.
-- `intent`: Ý định đã được phân loại.
-- `sql`: Câu lệnh SQL đã được tạo.
-- `data_result`: Dữ liệu thô từ database.
-- `history`: Lịch sử trò chuyện để giữ ngữ cảnh.
-- `retry_count`: Đếm số lần thử lại khi tạo SQL lỗi.
+Hệ thống sử dụng một lớp `TypedDict` có tên là `AgentState` được truyền đi xuyên suốt chu trình sống của Graph, đảm nhận vai trò bộ nhớ tập trung mô tả chi tiết trạng thái của mỗi phiên hỏi đáp. Các node trong LangGraph sau khi tiếp nhận State sẽ tiến hành chỉnh sửa nội dung State (delta updates).
+
+**Cấu trúc dữ liệu chính trong AgentState**:
+
+- **Thông tin Phiên & Nhận dạng Ngữ cảnh đầu vào**:
+  - `user_query`: Câu hỏi gốc của người dùng.
+  - `session_id`: ID định danh phiên chat hiện tại.
+  - `history`: Lịch sử các trao đổi trước đó (dạng mảng object messages) để bảo toàn mạch giao tiếp.
+
+- **Định tuyến Intent**:
+  - `intent`: Các luồng xử lý do LLM phân luồng (data, schema, knowledge, chart_request, etc).
+  - `clarification_question`: Câu hỏi hỏi lại người dùng để chốt yêu cầu nếu có sự mập mờ (ambiguous).
+
+- **Trích xuất Ngữ cảnh (Retrieval Context)**:
+  - `relevant_tables` & `schema_context`: Danh sách bảng và metadata tường minh của cấu trúc các bảng. Nó bao gồm foreign keys (chuyên dành cho Postgres), sample_row, column definition giúp việc sinh SQL chính xác.
+  - `knowledge_context`: Ngữ cảnh dữ liệu dạng văn bản từ hệ thống RAG dùng làm "Business Rule" bù trừ cho việc sinh SQL khi công thức phức tạp xuất hiện trong `domain_query`.
+
+- **Quy trình Sinh SQL & Check Valid**:
+  - `query_plan`: Suy luận ngôn ngữ con người về cách viết SQL.
+  - `generated_sql` & `sql_reasoning`: Lệnh SQL thô và giải thích.
+  - `sql_correction`: Danh sách cờ flag (`is_valid`) và messages lỗi được trả lại khi validator check failed.
+  - `retry_count`: Số lần loop lại node `sql_gen` (Max = 3).
+  - `final_sql`: Sql quyết định cuối cùng được chuyển xuống tầng xử lý máy chủ dưới DB sâu hơn.
+
+- **Thực thi và Đóng gói (Execution & Response)**:
+  - `query_result`: Array JSON records lấy nguyên mẫu từ Database (Postgres/ClickHouse).
+  - `execution_time_ms`, `row_count`: Trích xuất độ trễ và khối lượng data trả về.
+  - `chart_config` & `chart_data`: Các flag và thông số tọa độ biểu đồ khi giao diện cần render dashboard visualize dữ liệu cho người dùng.
+  - `answer` & `answer_format`: Đoạn văn bản hoàn chỉnh và thẻ format (ví dụ text, table, chart+text) để Frontend parse và hiển thị.
+  - `recommend_questions`: Danh sách gợi ý câu hỏi tiếp theo cho tính năng FAQ Auto-suggest.
 
 ---
 *Tài liệu này được cập nhật tự động để phản ánh kiến trúc Agentic đa tầng của NLSQL.*
+
+

@@ -65,7 +65,7 @@ services:
     image: redis:alpine
     container_name: nlsql_redis
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "${REDIS_PORT:-6097}:6097"
 
 volumes:
   qdrant_data:

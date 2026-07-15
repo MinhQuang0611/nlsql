@@ -106,8 +106,8 @@ class Settings(BaseSettings):
     qdrant_api_key: str | None = None
     
     redis_host: str = "localhost"
-    redis_port: int = 6379
-    redis_url: str = "redis://localhost:6379"
+    redis_port: int = 6097
+    redis_url: str = "redis://localhost:6097"
 
     google_sheet_url: str = ""
     google_sheets_credentials_file: str = "utils/ascendant-nova-478100-q0-a825170022ba.json"

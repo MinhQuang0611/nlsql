@@ -66,6 +66,7 @@ services:
     ports:
       - "${REDIS_PORT:-6097}:6097"
 
+
 volumes:
   mount-data:
   qdrant_data:

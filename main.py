@@ -73,6 +73,12 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # app.mount(
+    #     "/frontend",
+    #     StaticFiles(directory="app/frontend", html=True),
+    #     name="frontend"
+    # )
+    
     origins = (
         ["*"]
     )

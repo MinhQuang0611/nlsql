@@ -64,7 +64,8 @@ services:
     container_name: nlsql_redis_prod
     restart: always
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "${REDIS_PORT:-6097}:6097"
+
 
 volumes:
   mount-data:

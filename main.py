@@ -9,8 +9,6 @@ from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-
 from config import get_settings
 from db.connection import check_db_connection, close_db, init_db, init_internal_db
 from api.routers.chat import router as chat_router
@@ -30,14 +28,42 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+SCHEMA_INDEX_RETRIES = 5
+SCHEMA_INDEX_RETRY_DELAY = 3.0
+
+
+async def _index_schema_with_retry() -> None:
+    """Index schema vào Qdrant, retry vì Qdrant có thể chưa nhận HTTP ngay khi container start."""
+    last_error: Exception = RuntimeError("schema indexing did not run")
+    for attempt in range(1, SCHEMA_INDEX_RETRIES + 1):
+        try:
+            await index_schema_main()
+            return
+        except Exception as e:
+            last_error = e
+            if attempt < SCHEMA_INDEX_RETRIES:
+                logger.warning(
+                    "Schema indexing lỗi (lần %d/%d): %s — thử lại sau %.0fs",
+                    attempt, SCHEMA_INDEX_RETRIES, e, SCHEMA_INDEX_RETRY_DELAY,
+                )
+                await asyncio.sleep(SCHEMA_INDEX_RETRY_DELAY)
+    raise last_error
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Starting nlsql [env=%s]", settings.app_env)
 
     db_status = await check_db_connection()
-    if db_status["status"] != "ok":
+    if db_status["status"] == "error":
         logger.critical("DB not reachable on startup: %s", db_status["detail"])
         raise RuntimeError(f"Cannot connect to database: {db_status['detail']}")
+    if db_status["status"] == "degraded":
+        # Một domain hỏng không nên làm sập cả hệ thống — các domain còn lại vẫn phục vụ được.
+        logger.error(
+            "DB degraded — có domain không kết nối được: %s. Các domain OK: %s",
+            db_status["detail"], db_status["version"],
+        )
 
     logger.info("DB OK — %s", db_status["version"])
 
@@ -46,7 +72,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await init_internal_db()
 
     logger.info("Checking/indexing schema...")
-    await index_schema_main()
+    try:
+        await _index_schema_with_retry()
+    except Exception as se:
+        logger.error("Schema indexing bỏ qua (non-fatal): %s", se)
 
     # Tự động sync knowledge từ Google Sheet (không block nếu lỗi)
     try:
@@ -99,8 +128,6 @@ def create_app() -> FastAPI:
     app.include_router(chart_router, prefix="/api/v1")
     app.include_router(knowledge_router, prefix="/api/v1")
     app.include_router(faq_router, prefix="/api/v1")
-    app.include_router(chart_router, prefix="/api/v1")
-    app.include_router(knowledge_router, prefix="/api/v1")
 
     # Static files
     static_dir = os.path.join(os.path.dirname(__file__), "static")

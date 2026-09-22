@@ -1,317 +1,297 @@
+"""
+Schema linking: tìm những bảng cần cho câu hỏi.
+
+Retrieval hai tầng + từ vựng, rồi LLM chọn từ danh sách ứng viên có mô tả.
+
+Vì sao không dùng ngưỡng cosine tuyệt đối: điểm cosine giữa câu hỏi ngắn và mô tả
+bảng luôn quanh 0.4–0.6, ngưỡng cũ 0.68 chưa bao giờ có bảng nào vượt qua — vector
+search là code chết và LLM fallback (253 tên bảng trần, trần "5 bảng") gánh hết.
+Thứ hạng thì ổn định; điểm tuyệt đối thì không.
+
+Điểm của một bảng = kết hợp:
+  - cosine của chính bảng (text ngắn: tên + mô tả TV)
+  - cosine tốt nhất trong các CỘT của bảng ("trạng thái học" kéo SinhVien lên qua trangThaiHoc)
+  - khớp từ vựng: mô tả TV / tên bảng xuất hiện nguyên cụm trong câu hỏi
+"""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import math
+from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import Any
 
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_core.messages import HumanMessage
-from sqlalchemy import text
-from qdrant_client import QdrantClient
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_openai import OpenAIEmbeddings
+from pydantic import BaseModel, Field
+from qdrant_client import AsyncQdrantClient
+from qdrant_client.http.models import FieldCondition, Filter, MatchValue
 
 from config import get_settings
-from db.connection import get_db_context, ch_execute
-from graph.state import AgentState, TableColumn, TableSchema
-from prompts.schema_prune import SCHEMA_SYSTEM, SCHEMA_HUMAN
+from db.introspect import fetch_table_schema
+from graph.state import AgentState, TableSchema
+from prompts.schema_select import SCHEMA_SELECT_SYSTEM, SCHEMA_SELECT_HUMAN
+from utils.llm import make_llm
+from utils.text_norm import normalize, split_camel
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-_llm = ChatOpenAI(
-    model=settings.openai_model,
-    temperature=0,
-    api_key=settings.openai_api_key,
-)
+_llm = make_llm(temperature=0)
+
+TABLE_TOP_K = 30          # số bảng lấy từ tầng bảng
+COLUMN_TOP_K = 150        # số cột lấy từ tầng cột (nhiều bảng chia sẻ tên cột giống nhau)
+CANDIDATES = 20           # số ứng viên đưa cho LLM
+FALLBACK_PICK = 3         # nếu LLM lỗi: lấy top-N theo điểm kết hợp
+_CATALOG_TTL = 600        # giây — cache danh sách bảng (tên, mô tả, số dòng) để quét từ vựng
+
+W_TABLE, W_COLUMN, W_LEXICAL, W_PRIOR = 0.40, 0.30, 0.20, 0.10
+
+# Từ chung chung trong mô tả bảng, không mang thông tin khi so khớp từng từ.
+_STOPWORDS = {"thong", "tin", "danh", "muc", "bang", "du", "lieu", "cua", "va", "theo", "cac", "dm"}
 
 
 @lru_cache(maxsize=1)
-def _get_qdrant_client() -> QdrantClient:
-    return QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
+def _qdrant() -> AsyncQdrantClient:
+    return AsyncQdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
 
 
 @lru_cache(maxsize=1)
-def _get_embeddings() -> OpenAIEmbeddings:
-    return OpenAIEmbeddings(
-        model=settings.embedding_model,
-        api_key=settings.openai_api_key,
-    )
+def _embeddings() -> OpenAIEmbeddings:
+    return OpenAIEmbeddings(model=settings.embedding_model, api_key=settings.openai_api_key)
 
 
-# ---------------------------------------------------------------------------
-# SQL queries — Postgres
-# ---------------------------------------------------------------------------
+@dataclass
+class Candidate:
+    table: str
+    desc: str = ""
+    row_count: int = 0
+    fk_tables: list[str] = field(default_factory=list)
+    schema_json: str = ""
+    table_score: float = 0.0
+    column_score: float = 0.0
+    lexical: float = 0.0
+    matched_columns: list[str] = field(default_factory=list)
 
-_PG_GET_TABLES = text("""
-    SELECT table_name
-    FROM information_schema.tables
-    WHERE table_schema = 'public'
-      AND table_type = 'BASE TABLE'
-    ORDER BY table_name
-""")
+    @property
+    def prior(self) -> float:
+        # Bảng lớn thường là bảng thực thể / bảng sự kiện chính; bảng 0 dòng không trả lời được gì.
+        return min(math.log10(self.row_count + 1) / 6.0, 1.0)
 
-_PG_GET_TABLE_DESC = text("""
-    SELECT obj_description(pg_class.oid, 'pg_class') AS description
-    FROM pg_class
-    JOIN pg_namespace ON pg_namespace.oid = pg_class.relnamespace
-    WHERE pg_namespace.nspname = 'public' AND pg_class.relname = :table_name
-""")
-
-_PG_GET_FOREIGN_KEYS = text("""
-    SELECT
-        kcu.column_name,
-        ccu.table_name AS foreign_table,
-        ccu.column_name AS foreign_column
-    FROM information_schema.table_constraints AS tc
-    JOIN information_schema.key_column_usage AS kcu
-      ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
-    JOIN information_schema.constraint_column_usage AS ccu
-      ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
-    WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_name = :table_name
-""")
-
-_PG_GET_COLUMNS = text("""
-    SELECT
-        c.column_name,
-        c.data_type,
-        c.is_nullable,
-        pgd.description as comment
-    FROM information_schema.columns c
-    JOIN pg_class t ON c.table_name = t.relname
-    JOIN pg_namespace ns ON ns.oid = t.relnamespace AND ns.nspname = c.table_schema
-    JOIN pg_attribute a ON a.attrelid = t.oid AND a.attname = c.column_name AND a.attnum > 0
-    LEFT JOIN pg_description pgd ON pgd.objoid = t.oid AND pgd.objsubid = a.attnum
-    WHERE c.table_schema = 'public'
-      AND c.table_name = :table_name
-    ORDER BY c.ordinal_position
-""")
+    @property
+    def score(self) -> float:
+        return (W_TABLE * self.table_score + W_COLUMN * self.column_score
+                + W_LEXICAL * self.lexical + W_PRIOR * self.prior)
 
 
-# ---------------------------------------------------------------------------
-# SQL queries — ClickHouse
-# ---------------------------------------------------------------------------
-
-_CH_GET_TABLES = "SHOW TABLES"
-
-_CH_GET_COLUMNS = """
-    SELECT
-        name        AS column_name,
-        type        AS data_type,
-        comment     AS comment
-    FROM system.columns
-    WHERE database = '{db}' AND table = '{table}'
-    ORDER BY position
-"""
-
-_CH_GET_SAMPLE = "SELECT * FROM `{table}` LIMIT 3"
-_PG_GET_SAMPLE = 'SELECT * FROM "{table}" LIMIT 3'
+class TableSelection(BaseModel):
+    tables: list[str] = Field(description="Tên các bảng cần thiết, viết đúng y nguyên.")
 
 
-# ---------------------------------------------------------------------------
-# Fetch helpers — Postgres
-# ---------------------------------------------------------------------------
-
-async def _pg_fetch_all_tables(domain: str) -> list[str]:
-    async with get_db_context(domain) as db:
-        result = await db.execute(_PG_GET_TABLES)
-        return [row[0] for row in result.fetchall()]
-
-
-async def _pg_fetch_table_schema(domain: str, table_name: str) -> TableSchema:
-    async with get_db_context(domain) as db:
-        desc_row = (await db.execute(_PG_GET_TABLE_DESC, {"table_name": table_name})).fetchone()
-        description = desc_row[0] if desc_row and desc_row[0] else None
-
-        fk_rows = (await db.execute(_PG_GET_FOREIGN_KEYS, {"table_name": table_name})).fetchall()
-        foreign_keys = [
-            {"column_name": r.column_name, "foreign_table": r.foreign_table, "foreign_column": r.foreign_column}
-            for r in fk_rows
-        ]
-
-        col_rows = (await db.execute(_PG_GET_COLUMNS, {"table_name": table_name})).fetchall()
-        columns: list[TableColumn] = [
-            TableColumn(
-                name=r.column_name,
-                type=r.data_type,
-                nullable=r.is_nullable == "YES",
-                comment=r.comment,
-            )
-            for r in col_rows
-        ]
-
-        sample_rows_raw = (await db.execute(text(_PG_GET_SAMPLE.format(table=table_name)))).fetchall()
-        sample_rows = [dict(r._mapping) for r in sample_rows_raw]
-
-    return TableSchema(
-        table_name=table_name,
-        description=description,
-        columns=columns,
-        foreign_keys=foreign_keys,
-        sample_rows=sample_rows,
-    )
+def _lexical_score(query_norm: str, table: str, desc: str) -> float:
+    """
+    1.0  mô tả TV xuất hiện nguyên cụm trong câu hỏi ("Ngành" trong "bao nhiêu ngành đào tạo")
+    0.8  tên bảng (tách camelCase) xuất hiện nguyên cụm
+    else tỉ lệ từ của mô tả có mặt trong câu hỏi (bỏ stopword) — chỉ là tie-breaker
+    """
+    d = normalize(desc)
+    if d and len(d) >= 3 and f" {d} " in f" {query_norm} ":
+        return 1.0
+    t = split_camel(table)
+    if t and f" {t} " in f" {query_norm} ":
+        return 0.8
+    tokens = [w for w in d.split() if w not in _STOPWORDS]
+    if not tokens:
+        return 0.0
+    q = set(query_norm.split())
+    return sum(1 for w in tokens if w in q) / len(tokens) * 0.6
 
 
-# ---------------------------------------------------------------------------
-# Fetch helpers — ClickHouse
-# ---------------------------------------------------------------------------
-
-async def _ch_fetch_all_tables(domain: str) -> list[str]:
-    rows = await ch_execute(domain, _CH_GET_TABLES)
-    return [row[0] for row in rows]
+_catalog_cache: dict[str, tuple[float, list[dict]]] = {}
 
 
-async def _ch_fetch_table_schema(domain: str, table_name: str) -> TableSchema:
-    col_sql = _CH_GET_COLUMNS.format(db=settings.get_db_name(domain), table=table_name)
-    col_rows = await ch_execute(domain, col_sql)
-
-    columns: list[TableColumn] = [
-        TableColumn(
-            name=row[0],
-            type=row[1],
-            nullable=False,   # ClickHouse dùng Nullable(T) trong type string
-            comment=row[2] if len(row) > 2 else None,
+async def _catalog(domain: str) -> list[dict]:
+    """Payload gọn của MỌI bảng trong domain (không vector), cache theo TTL — để quét từ vựng."""
+    import time
+    now = time.monotonic()
+    cached = _catalog_cache.get(domain)
+    if cached and now - cached[0] < _CATALOG_TTL:
+        return cached[1]
+    rows: list[dict] = []
+    offset = None
+    while True:
+        pts, offset = await _qdrant().scroll(
+            f"schema_collection_{domain}", limit=256, offset=offset, with_payload=True, with_vectors=False,
         )
-        for row in col_rows
-    ]
+        rows.extend(p.payload for p in pts if p.payload)
+        if offset is None:
+            break
+    _catalog_cache[domain] = (now, rows)
+    return rows
 
-    sample_sql = _CH_GET_SAMPLE.format(table=table_name)
-    sample_raw = await ch_execute(domain, sample_sql)
-    if sample_raw and hasattr(sample_raw[0], "_mapping"):
-        sample_rows = [dict(r._mapping) for r in sample_raw]
-    elif sample_raw and hasattr(sample_raw[0], "_fields"):
-        sample_rows = [r._asdict() for r in sample_raw]
-    else:
-        col_names = [c["name"] for c in columns]
-        sample_rows = [dict(zip(col_names, row)) for row in sample_raw]
 
-    return TableSchema(
-        table_name=table_name,
-        description=None,       # ClickHouse không có table-level description
-        columns=columns,
-        foreign_keys=[],        # ClickHouse không có FK
-        sample_rows=sample_rows,
+async def _retrieve_candidates(domain: str, user_query: str) -> list[Candidate]:
+    qdrant = _qdrant()
+    vector = await _embeddings().aembed_query(user_query)
+    table_res, column_res = await asyncio.gather(
+        qdrant.query_points(f"schema_collection_{domain}", query=vector, limit=TABLE_TOP_K, with_payload=True),
+        qdrant.query_points(f"schema_columns_{domain}", query=vector, limit=COLUMN_TOP_K, with_payload=True),
     )
 
+    cands: dict[str, Candidate] = {}
 
-# ---------------------------------------------------------------------------
-# Unified helpers (route theo active_db)
-# ---------------------------------------------------------------------------
+    def get(table: str) -> Candidate:
+        if table not in cands:
+            cands[table] = Candidate(table=table)
+        return cands[table]
 
-async def _fetch_all_tables(domain: str) -> list[str]:
-    if settings.active_db == "clickhouse":
-        return await _ch_fetch_all_tables(domain)
-    return await _pg_fetch_all_tables(domain)
+    for hit in table_res.points:
+        p = hit.payload or {}
+        c = get(p["table_name"])
+        c.table_score = max(c.table_score, hit.score)
+        c.desc, c.row_count = p.get("table_desc", ""), p.get("row_count", 0)
+        c.fk_tables, c.schema_json = p.get("fk_tables", []), p.get("schema_json", "")
+
+    for hit in column_res.points:
+        p = hit.payload or {}
+        c = get(p["table_name"])
+        if hit.score > c.column_score:
+            c.column_score = hit.score
+        if len(c.matched_columns) < 3:
+            label = p.get("vi_name") or p["column_name"]
+            c.matched_columns.append(f"{label} ({p['column_name']})")
+
+    # Bảng chỉ xuất hiện ở tầng cột chưa có payload — nạp bổ sung.
+    missing = [t for t, c in cands.items() if not c.schema_json]
+    if missing:
+        pts, _ = await qdrant.scroll(
+            f"schema_collection_{domain}", limit=len(missing), with_payload=True, with_vectors=False,
+            scroll_filter=Filter(should=[FieldCondition(key="table_name", match=MatchValue(value=t)) for t in missing]),
+        )
+        for pt in pts:
+            p = pt.payload or {}
+            c = cands[p["table_name"]]
+            c.desc, c.row_count = p.get("table_desc", ""), p.get("row_count", 0)
+            c.fk_tables, c.schema_json = p.get("fk_tables", []), p.get("schema_json", "")
+
+    # Quét từ vựng trên TOÀN BỘ bảng: bảng có mô tả / tên khớp nguyên cụm luôn được vào
+    # danh sách, kể cả khi vector xếp nó ngoài top-K ("Nganh" từng đứng hạng 26/253 cho
+    # câu "bao nhiêu ngành đào tạo" vì mọi bảng *DaoTao khác đều khớp "đào tạo").
+    query_norm = normalize(user_query)
+    for p in await _catalog(domain):
+        lex = _lexical_score(query_norm, p["table_name"], p.get("table_desc", ""))
+        if lex >= 0.8 and p["table_name"] not in cands:
+            c = get(p["table_name"])
+            c.desc, c.row_count = p.get("table_desc", ""), p.get("row_count", 0)
+            c.fk_tables, c.schema_json = p.get("fk_tables", []), p.get("schema_json", "")
+    for c in cands.values():
+        c.lexical = _lexical_score(query_norm, c.table, c.desc)
+
+    ranked = sorted(cands.values(), key=lambda c: c.score, reverse=True)[:CANDIDATES]
+
+    # Bảng có quy tắc nghiệp vụ (TABLE_RULES) là bảng trọng yếu — luôn cho LLM thấy, kèm quy tắc,
+    # để câu hỏi mơ hồ ("tín chỉ tích luỹ", "lượt học") có cơ hội chọn đúng dù vector xếp thấp.
+    present = {c.table for c in ranked}
+    for p in await _catalog(domain):
+        t = p["table_name"]
+        if t in settings.TABLE_RULES and t not in present:
+            c = cands.get(t) or Candidate(table=t)
+            c.desc, c.row_count = p.get("table_desc", ""), p.get("row_count", 0)
+            c.fk_tables, c.schema_json = p.get("fk_tables", []), p.get("schema_json", "")
+            ranked.append(c)
+    logger.info("[SchemaAgent] ứng viên: %s",
+                ", ".join(f"{c.table}={c.score:.2f}(t{c.table_score:.2f}/c{c.column_score:.2f}/l{c.lexical:.1f}/p{c.prior:.1f})" for c in ranked))
+    return ranked
 
 
-async def _fetch_table_schema(domain: str, table_name: str) -> TableSchema:
-    if settings.active_db == "clickhouse":
-        return await _ch_fetch_table_schema(domain, table_name)
-    return await _pg_fetch_table_schema(domain, table_name)
+def _format_candidates(cands: list[Candidate]) -> str:
+    lines = []
+    for c in cands:
+        parts = [f"- {c.table}"]
+        if c.desc:
+            parts.append(f"— {c.desc}")
+        parts.append(f"({c.row_count:,} dòng)".replace(",", "."))
+        if c.matched_columns:
+            parts.append("| cột khớp: " + ", ".join(c.matched_columns))
+        if c.fk_tables:
+            parts.append("| liên kết: " + ", ".join(c.fk_tables[:8]))
+        lines.append(" ".join(parts))
+    return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------------
-# schema_agent node
-# ---------------------------------------------------------------------------
+async def _select_tables(user_query: str, cands: list[Candidate]) -> list[str]:
+    rules = "\n".join(f"- {k}: {v}" for k, v in settings.TABLE_RULES.items())
+    messages = [
+        SystemMessage(content=SCHEMA_SELECT_SYSTEM),
+        HumanMessage(content=SCHEMA_SELECT_HUMAN.format(
+            user_query=user_query, candidates=_format_candidates(cands), rules=rules,
+        )),
+    ]
+    try:
+        result = await _llm.with_structured_output(TableSelection).ainvoke(messages)
+        picked = [t.strip() for t in result.tables if t.strip()]
+    except Exception as exc:
+        logger.error("[SchemaAgent] LLM chọn bảng lỗi: %s", exc)
+        picked = []
 
-async def schema_agent(state: AgentState) -> AgentState:
+    allowed = {c.table for c in cands} | {t for c in cands for t in c.fk_tables}
+    valid = [t for t in picked if t in allowed]
+    dropped = set(picked) - set(valid)
+    if dropped:
+        logger.warning("[SchemaAgent] LLM trả bảng ngoài danh sách, bỏ: %s", dropped)
+    if not valid:
+        valid = [c.table for c in cands[:FALLBACK_PICK]]
+        logger.warning("[SchemaAgent] không có lựa chọn hợp lệ — dùng top-%d: %s", FALLBACK_PICK, valid)
+    return valid
+
+
+async def _load_schemas(domain: str, tables: list[str], cands: list[Candidate]) -> list[TableSchema]:
+    """schema_json trong payload đã gồm tên TV + FK Excel; bảng ngoài ứng viên thì tra Qdrant, cuối cùng mới hỏi DB."""
+    by_name = {c.table: c for c in cands}
+    out: list[TableSchema] = []
+    for t in tables:
+        c = by_name.get(t)
+        if c and c.schema_json:
+            out.append(json.loads(c.schema_json))
+            continue
+        pts, _ = await _qdrant().scroll(
+            f"schema_collection_{domain}", limit=1, with_payload=True, with_vectors=False,
+            scroll_filter=Filter(must=[FieldCondition(key="table_name", match=MatchValue(value=t))]),
+        )
+        if pts and pts[0].payload.get("schema_json"):
+            out.append(json.loads(pts[0].payload["schema_json"]))
+        else:
+            try:
+                out.append(await fetch_table_schema(domain, t))
+            except Exception as exc:
+                logger.error("[SchemaAgent] không lấy được schema %s: %s", t, exc)
+    return out
+
+
+async def schema_agent(state: AgentState) -> dict:
+    """
+    Đọc : user_query, domain, selected_tables
+    Ghi  : relevant_tables, schema_context
+    """
     domain = state.get("domain", "qldt")
     user_query = state["user_query"]
-    selected_tables = state.get("selected_tables")
 
-    if selected_tables:
-        logger.info("[SchemaAgent] Giới hạn truy vấn trong các bảng được chọn: %s", selected_tables)
-        try:
-            schema_context = [await _fetch_table_schema(domain, t) for t in selected_tables]
-            return {**state, "relevant_tables": selected_tables, "schema_context": schema_context}
-        except Exception as exc:
-            logger.error("[SchemaAgent] Lỗi khi lấy schema cho selected_tables: %s", exc)
-            return {"relevant_tables": [], "schema_context": []}
-
-    SCORE_THRESHOLD = 0.68
-    SEARCH_LIMIT = 20
-
-    logger.info("[SchemaAgent] Qdrant semantic search for: %r", user_query)
-    relevant_tables: list[str] = []
-    schema_context: list = []
+    selected = state.get("selected_tables")
+    if selected:
+        logger.info("[SchemaAgent] giới hạn theo bảng người dùng chọn: %s", selected)
+        schemas = await _load_schemas(domain, selected, [])
+        return {"relevant_tables": [s["table_name"] for s in schemas], "schema_context": schemas}
 
     try:
-        qdrant = _get_qdrant_client()
-        embeddings = _get_embeddings()
-
-        vector = embeddings.embed_query(user_query)
-        response = qdrant.query_points(
-            collection_name=f"schema_collection_{domain}",
-            query=vector,
-            limit=SEARCH_LIMIT,
-            with_payload=True,
-        )
-        search_result = response.points
-
-        # Dedup: keep highest-score hit per table_name
-        best: dict[str, Any] = {}
-        for hit in search_result:
-            if not hit.payload:
-                continue
-            tname = hit.payload.get("table_name", "")
-            score = hit.score if hasattr(hit, "score") else 0.0
-            if tname not in best or score > best[tname].score:
-                best[tname] = hit
-
-        passed = [(t, h) for t, h in best.items() if h.score >= SCORE_THRESHOLD]
-        passed.sort(key=lambda x: x[1].score, reverse=True)
-
-        if passed:
-            score_log = ", ".join(f"{t}={h.score:.3f}" for t, h in passed)
-            logger.info("[SchemaAgent] Tables passed threshold (%.2f): %s", SCORE_THRESHOLD, score_log)
-        else:
-            all_scores = ", ".join(
-                f"{t}={h.score:.3f}"
-                for t, h in sorted(best.items(), key=lambda x: x[1].score, reverse=True)
-            )
-            logger.warning("[SchemaAgent] No table >= %.2f. All scores: %s", SCORE_THRESHOLD, all_scores)
-
-        for tname, hit in passed:
-            relevant_tables.append(tname)
-            schema_context.append(json.loads(hit.payload["schema_json"]))
-
-        # LLM fallback khi tìm được < 2 bảng
-        if len(relevant_tables) < 2:
-            logger.warning(
-                "[SchemaAgent] Only %d table(s) found via vector search. Falling back to LLM.",
-                len(relevant_tables),
-            )
-            try:
-                all_table_names = await _fetch_all_tables(domain)
-                table_list_str = "\n".join(f"- {t}" for t in all_table_names)
-                rules_str = "\n".join(f"- {k}: {v}" for k, v in settings.TABLE_RULES.items())
-                fallback_prompt = (
-                    f"Người dùng hỏi: {user_query}\n\n"
-                    f"Danh sách tất cả các bảng trong cơ sở dữ liệu:\n{table_list_str}\n\n"
-                    f"Lưu ý các quy tắc chọn bảng (RẤT QUAN TRỌNG):\n{rules_str}\n\n"
-                    "Hãy liệt kê tên các bảng CÓ THỂ LIÊN QUAN đến câu hỏi trên. Cố gắng chọn tối đa 5 bảng chính xác nhất.\n"
-                    "Chỉ trả lời bằng danh sách tên bảng, mỗi bảng trên một dòng, không giải thích."
-                )
-                llm_response = _llm.invoke([HumanMessage(content=fallback_prompt)])
-                llm_tables = [
-                    line.strip().lstrip("- ").strip()
-                    for line in llm_response.content.strip().splitlines()
-                    if line.strip()
-                ]
-                existing = set(relevant_tables)
-                valid_all = set(all_table_names)
-                new_tables = [t for t in llm_tables if t in valid_all and t not in existing]
-                logger.info("[SchemaAgent] LLM fallback suggested: %s → valid new: %s", llm_tables, new_tables)
-
-                for tname in new_tables:
-                    schema = await _fetch_table_schema(domain, tname)
-                    relevant_tables.append(tname)
-                    schema_context.append(schema)
-
-            except Exception as fallback_exc:
-                logger.error("[SchemaAgent] LLM fallback failed: %s", fallback_exc)
-
+        cands = await _retrieve_candidates(domain, user_query)
     except Exception as exc:
-        logger.error("[SchemaAgent] Qdrant search failed: %s. Ensure Qdrant is running and populated.", exc)
+        logger.error("[SchemaAgent] retrieval lỗi (Qdrant chưa index?): %s", exc, exc_info=True)
+        return {"relevant_tables": [], "schema_context": []}
+    if not cands:
+        return {"relevant_tables": [], "schema_context": []}
 
-    logger.info("[SchemaAgent] Final relevant_tables = %s", relevant_tables)
-    return {"relevant_tables": relevant_tables, "schema_context": schema_context}
+    tables = await _select_tables(user_query, cands)
+    schemas = await _load_schemas(domain, tables, cands)
+    logger.info("[SchemaAgent] chọn: %s", tables)
+    return {"relevant_tables": tables, "schema_context": schemas}

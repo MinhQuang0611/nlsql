@@ -1,5 +1,13 @@
 # Tài liệu API Chat Streaming (SSE)
 
+> ⚠️ **TÀI LIỆU NÀY ĐÃ LỆCH VỚI CODE** (kiểm tra 2026-09-15).
+> Nó mô tả kiến trúc **trước** đợt nâng cấp đa DB và streaming. Những chỗ đã khác:
+> - `answer_token` nay là token LLM thật, bắn TRƯỚC `node_finish` của node `answer`
+> - `state_update` nay chỉ chứa khoá đã đổi và luôn là JSON hợp lệ
+>
+> Nguồn chân lý hiện tại: **[TRANG_THAI_HIEN_TAI.md](TRANG_THAI_HIEN_TAI.md)**
+
+
 Tài liệu này mô tả chi tiết các endpoint và luồng dữ liệu (data flow) mới nhất của tính năng Chat Streaming trong hệ thống NLSQL. Tính năng này cung cấp trải nghiệm theo thời gian thực (real-time) giúp giao diện người dùng hiển thị từng bước suy luận của AI và nội dung câu trả lời dưới dạng "typewriter" (gõ chữ) ngay lập tức.
 
 ## 1. Các Endpoints Hỗ trợ Streaming

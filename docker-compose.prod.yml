@@ -13,9 +13,9 @@ services:
     command: [ "/app/entrypoint.sh" ]
     depends_on:
       qdrant:
-        condition: service_started
+        condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       db:
         condition: service_healthy
 
@@ -58,13 +58,25 @@ services:
       - "${QDRANT_EXTERNAL_PORT:-63332}:6333"
     volumes:
       - qdrant_data:/qdrant/storage
+    healthcheck:
+      # image qdrant chỉ có bash (không curl/wget) → kiểm tra bằng /dev/tcp
+      test: [ "CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6333" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
   redis:
     image: redis:alpine
     container_name: nlsql_redis_prod
     restart: always
     ports:
-      - "${REDIS_PORT:-6097}:6097"
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
 
 volumes:

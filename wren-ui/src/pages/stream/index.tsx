@@ -493,6 +493,10 @@ export default function StreamPage() {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
+        // Backend stream token của câu trả lời NGAY TRONG LÚC LLM sinh, nên chúng
+        // tới trước event node_finish của node "answer". Cờ này để biết đã bắt đầu
+        // nhận text thật hay chưa, tránh xoá nhầm ở nhánh node_finish bên dưới.
+        let answerStarted = false;
 
         while (true) {
           const { value, done } = await reader.read();
@@ -509,10 +513,14 @@ export default function StreamPage() {
                 const eventData = JSON.parse(jsonStr);
                 if (eventData.event === 'node_finish') {
                   setCurrentlyThinkingNode(eventData.node);
-                  setStreamingAnswer(''); // reset when new node starts
-                  // Artificial delay to make step transitions visible
-                  await new Promise(r => setTimeout(r, 80));
+                  // Chỉ xoá khi câu trả lời CHƯA bắt đầu stream. Xoá vô điều kiện
+                  // sẽ thổi bay nội dung vừa hiện, vì node_finish của node "answer"
+                  // luôn tới SAU các token của chính nó.
+                  if (!answerStarted) setStreamingAnswer('');
+                  // Bỏ delay nhân tạo 80ms: nó chặn cả vòng đọc reader nên làm trễ
+                  // luôn các token đến sau, đúng thứ cần hiện nhanh nhất.
                 } else if (eventData.event === 'answer_token') {
+                  answerStarted = true;
                   setCurrentlyThinkingNode(null);
                   setStreamingAnswer(prev => prev + eventData.token);
                 } else if (eventData.event === 'final_result') {

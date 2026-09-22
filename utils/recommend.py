@@ -8,18 +8,13 @@ import json
 import logging
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
-
 from config import get_settings
+from utils.llm import make_llm
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-_llm = ChatOpenAI(
-    model=settings.recommend_model,
-    temperature=settings.recommend_temperature,
-    api_key=settings.openai_api_key,
-)
+_llm = make_llm(model=settings.recommend_model, temperature=settings.recommend_temperature)
 
 _SYSTEM_PROMPT = """\
 Bạn là trợ lý phân tích dữ liệu thông minh. Nhiệm vụ của bạn là đề xuất các câu hỏi follow-up

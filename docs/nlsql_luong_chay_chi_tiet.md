@@ -1,5 +1,14 @@
 # nlsql — Luồng chạy chi tiết (end-to-end)
 
+> ⚠️ **TÀI LIỆU NÀY ĐÃ LỆCH VỚI CODE** (kiểm tra 2026-09-15).
+> Nó mô tả kiến trúc **trước** đợt nâng cấp đa DB và streaming. Những chỗ đã khác:
+> - thiếu 2 node mới `domain_router` và `data_check`
+> - `AgentState` có thêm `domain`, `domain_reasoning`, `data_retry_count`
+> - engine tạo theo từng domain, không theo `active_db` toàn cục
+>
+> Nguồn chân lý hiện tại: **[TRANG_THAI_HIEN_TAI.md](TRANG_THAI_HIEN_TAI.md)**
+
+
 Tài liệu này giải thích luồng thực thi của dự án `nlsql` theo đúng code hiện có trong thư mục `/home/ubuntu/Desktop/quangnm/nlsql`.
 
 ## 1) Thành phần chính trong hệ thống

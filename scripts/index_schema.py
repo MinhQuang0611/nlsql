@@ -1,179 +1,227 @@
+"""
+Index schema vào Qdrant theo HAI TẦNG cho mỗi domain:
+
+  schema_collection_<domain>   — một điểm / bảng. Text embed NGẮN (tên + mô tả tiếng Việt),
+                                 payload chứa schema_json đầy đủ (cột + tên TV + FK Excel +
+                                 sample) và row_count.
+  schema_columns_<domain>      — một điểm / cột nghiệp vụ. Text = "Tên TV (col) — bảng X (mô tả)".
+
+Vì sao hai tầng: bản cũ nhét MỌI cột vào một đoạn văn dài rồi embed. Câu hỏi
+"Tổng số sinh viên" khi đó khớp `DotXtnSinhVien`, `HeSoQuyMoLop` (nhiều cột chứa
+"sinh viên") hơn chính bảng `SinhVien` — bảng đúng đứng hạng 18/253. Tách cột ra
+điểm riêng thì bảng được kéo lên nhờ cột khớp nhất ("trạng thái học" → `trangThaiHoc`)
+mà không bị pha loãng bởi số lượng cột.
+
+Chạy:  python -m scripts.index_schema              # bỏ qua domain đã index đúng version
+       python -m scripts.index_schema qldt --force # index lại
+"""
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
+import sys
 from typing import Any
 
-from qdrant_client import QdrantClient
-from qdrant_client.http.models import Distance, VectorParams, PointStruct
 from langchain_openai import OpenAIEmbeddings
-import pandas as pd
+from qdrant_client import QdrantClient
+from qdrant_client.http.models import Distance, PointStruct, VectorParams
+from sqlalchemy import text
 
+from db.introspect import fetch_all_tables, fetch_table_schema
 from config import get_settings
-# from db.connection import get_db_context
-from agents.schema_agent import _fetch_all_tables, _fetch_table_schema
+from db.connection import ch_execute, get_db_context, is_clickhouse
+from utils.excel_metadata import excel_path_for, load_excel_metadata
+from utils.text_norm import split_camel
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
 settings = get_settings()
 
-COLLECTION_NAME = "schema_collection"
+# Tăng khi đổi cấu trúc payload / cách embed — startup sẽ tự index lại.
+INDEX_VERSION = 2
+_EMBED_BATCH = 128
 
-def load_excel_metadata(file_path: str) -> dict:
-    """Read QLDT_FINAL.xlsx 'Database Schema' sheet and build a mapping dictionary."""
-    mapping = {}
+# Cột kỹ thuật: vẫn nằm trong schema_json, nhưng không tạo điểm riêng (chỉ gây nhiễu).
+_TECH_COLUMNS = {"_id", "id", "createdAt", "updatedAt", "deletedAt", "active", "deleted",
+                 "isDeleted", "createdBy", "updatedBy", "__v"}
+
+
+def table_collection(domain: str) -> str:
+    return f"schema_collection_{domain}"
+
+
+def column_collection(domain: str) -> str:
+    return f"schema_columns_{domain}"
+
+
+async def _row_count(domain: str, table: str) -> int:
     try:
-        df = pd.read_excel(file_path, sheet_name="Database Schema")
-        df = df.fillna("")
-        current_table = None
-        
-        for _, row in df.iterrows():
-            thuoc_tinh = str(row.get("Tên thuộc tính", "")).strip()
-            ten_bang = str(row.get("Tên bảng", "")).strip()
-            tieng_viet = str(row.get("Tên tiếng Việt", "")).strip()
-            ghi_chu = str(row.get("Ghi chú tham chiếu", "")).strip()
-            
-            if thuoc_tinh == "--- BẢNG ---" and ten_bang:
-                current_table = ten_bang
-                mapping[current_table] = {"table_desc": tieng_viet, "columns": {}}
-            elif current_table and thuoc_tinh and thuoc_tinh != "--- BẢNG ---":
-                mapping[current_table]["columns"][thuoc_tinh] = {
-                    "vi_name": tieng_viet,
-                    "note": ghi_chu
-                }
-        logger.info(f"Loaded Excel metadata for {len(mapping)} tables.")
-    except Exception as e:
-        logger.error(f"Failed to load Excel metadata: {e}")
-    return mapping
+        if is_clickhouse(domain):
+            rows = await ch_execute(domain, f"SELECT count() FROM `{table}`")
+            return int(rows[0][0]) if rows else 0
+        async with get_db_context(domain) as db:
+            r = await db.execute(text("SELECT reltuples::bigint FROM pg_class WHERE relname = :t"), {"t": table})
+            v = r.scalar()
+            return max(int(v or 0), 0)
+    except Exception as exc:
+        logger.warning("row_count(%s.%s) lỗi: %s", domain, table, exc)
+        return 0
 
-async def main():
-    logger.info("Starting schema indexing into Qdrant...")
-    
-    qdrant = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
-    
-    embeddings = OpenAIEmbeddings(
-        model=settings.embedding_model, 
-        api_key=settings.openai_api_key
+
+def _merge_excel(schema: dict, meta: dict) -> None:
+    """Gắn tên TV / ghi chú / FK từ Excel vào TableSchema (in-place)."""
+    if meta.get("table_desc"):
+        schema["excel_table_desc"] = meta["table_desc"]
+    col_meta = meta.get("columns", {})
+    existing_fk = {(fk["column_name"], fk["foreign_table"]) for fk in schema.get("foreign_keys") or []}
+    fks = list(schema.get("foreign_keys") or [])
+    for c in schema["columns"]:
+        m = col_meta.get(c["name"])
+        if not m:
+            continue
+        if m.get("vi_name"):
+            c["excel_vi_name"] = m["vi_name"]
+        if m.get("note"):
+            c["excel_note"] = m["note"]
+        if m.get("fk_table") and (c["name"], m["fk_table"]) not in existing_fk:
+            fks.append({"column_name": c["name"], "foreign_table": m["fk_table"],
+                        "foreign_column": m.get("fk_column", "")})
+    schema["foreign_keys"] = fks
+
+
+def _table_text(name: str, desc: str, module: str) -> str:
+    words = split_camel(name)
+    parts = [f"Bảng {name} ({words})"]
+    if desc:
+        parts.append(f"lưu thông tin về {desc}")
+    if module:
+        parts.append(f"thuộc phân hệ {module}")
+    return ". ".join(parts) + "."
+
+
+def _column_text(col: str, vi: str, table: str, desc: str) -> str:
+    label = f"{vi} ({col})" if vi else f"{col} ({split_camel(col)})"
+    where = f"bảng {table}" + (f" — {desc}" if desc else "")
+    return f"{label}, thuộc {where}."
+
+
+def _json_safe(obj: Any) -> Any:
+    return json.loads(json.dumps(obj, default=str, ensure_ascii=False))
+
+
+def _ensure_collection(qdrant: QdrantClient, name: str) -> None:
+    if qdrant.collection_exists(name):
+        qdrant.delete_collection(name)
+    qdrant.create_collection(
+        collection_name=name,
+        vectors_config=VectorParams(size=settings.embedding_dimensions, distance=Distance.COSINE),
     )
-    
-    domains = ["qldt", "tcns"]
+
+
+def is_indexed(qdrant: QdrantClient, domain: str) -> bool:
+    """True nếu domain đã có index đúng INDEX_VERSION."""
+    name = table_collection(domain)
+    if not qdrant.collection_exists(name) or not qdrant.collection_exists(column_collection(domain)):
+        return False
+    pts, _ = qdrant.scroll(name, limit=1, with_payload=True, with_vectors=False)
+    return bool(pts) and pts[0].payload.get("index_version") == INDEX_VERSION
+
+
+def _embed_batches(embeddings: OpenAIEmbeddings, texts: list[str]) -> list[list[float]]:
+    out: list[list[float]] = []
+    for i in range(0, len(texts), _EMBED_BATCH):
+        out.extend(embeddings.embed_documents(texts[i:i + _EMBED_BATCH]))
+    return out
+
+
+async def index_domain(domain: str, qdrant: QdrantClient, embeddings: OpenAIEmbeddings) -> tuple[int, int]:
+    all_tables = await fetch_all_tables(domain)
+    logger.info("[%s] %d bảng trong DB", domain, len(all_tables))
+    if not all_tables:
+        return 0, 0
+
+    excel = load_excel_metadata(excel_path_for(domain))
+
+    table_points: list[PointStruct] = []
+    table_texts: list[str] = []
+    col_payloads: list[dict] = []
+    col_texts: list[str] = []
+
+    for idx, tname in enumerate(all_tables):
+        schema = await fetch_table_schema(domain, tname)
+        meta = excel.get(tname, {})
+        _merge_excel(schema, meta)
+        desc = meta.get("table_desc", "") or schema.get("description") or ""
+        module = meta.get("module", "")
+        row_count = await _row_count(domain, tname)
+
+        # Sample chỉ giữ 1 dòng, cắt chuỗi dài — payload không phải chỗ chứa dữ liệu.
+        if schema.get("sample_rows"):
+            sample = {k: (str(v)[:60] if v is not None else None) for k, v in schema["sample_rows"][0].items()}
+            schema["sample_rows"] = [sample]
+
+        table_texts.append(_table_text(tname, desc, module))
+        table_points.append(PointStruct(
+            id=idx + 1, vector=[],  # vector gán sau khi embed batch
+            payload={
+                "index_version": INDEX_VERSION,
+                "table_name": tname,
+                "table_desc": desc,
+                "module": module,
+                "row_count": row_count,
+                "n_columns": len(schema["columns"]),
+                "fk_tables": sorted({fk["foreign_table"] for fk in schema.get("foreign_keys") or []}),
+                "schema_json": json.dumps(_json_safe(schema), ensure_ascii=False),
+            },
+        ))
+
+        for c in schema["columns"]:
+            if c["name"] in _TECH_COLUMNS:
+                continue
+            vi = c.get("excel_vi_name", "")
+            col_texts.append(_column_text(c["name"], vi, tname, desc))
+            col_payloads.append({
+                "index_version": INDEX_VERSION,
+                "table_name": tname,
+                "column_name": c["name"],
+                "vi_name": vi,
+            })
+        logger.info("[%s] %s — %d cột, %d dòng", domain, tname, len(schema["columns"]), row_count)
+
+    logger.info("[%s] embedding %d bảng + %d cột…", domain, len(table_texts), len(col_texts))
+    for p, v in zip(table_points, _embed_batches(embeddings, table_texts)):
+        p.vector = v
+    col_points = [
+        PointStruct(id=i + 1, vector=v, payload=pl)
+        for i, (v, pl) in enumerate(zip(_embed_batches(embeddings, col_texts), col_payloads))
+    ]
+
+    _ensure_collection(qdrant, table_collection(domain))
+    qdrant.upsert(collection_name=table_collection(domain), points=table_points)
+    _ensure_collection(qdrant, column_collection(domain))
+    for i in range(0, len(col_points), 512):
+        qdrant.upsert(collection_name=column_collection(domain), points=col_points[i:i + 512])
+
+    logger.info("[%s] xong: %d bảng, %d cột.", domain, len(table_points), len(col_points))
+    return len(table_points), len(col_points)
+
+
+async def main(domains: list[str] | None = None, force: bool = False) -> None:
+    domains = domains or settings.list_domains()
+    qdrant = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
+    embeddings = OpenAIEmbeddings(model=settings.embedding_model, api_key=settings.openai_api_key)
+
     for domain in domains:
-        collection_name = f"schema_collection_{domain}"
-        logger.info(f"--- Processing domain: {domain} ---")
-        
-        collections = qdrant.get_collections().collections
-        if not any(c.name == collection_name for c in collections):
-            logger.info(f"Creating collection {collection_name}")
-            qdrant.create_collection(
-                collection_name=collection_name,
-                vectors_config=VectorParams(size=1536, distance=Distance.COSINE),
-            )
-        else:
-            logger.info(f"Collection {collection_name} already exists. Skipping indexing.")
+        if not force and is_indexed(qdrant, domain):
+            logger.info("[%s] đã có index version %d — bỏ qua (dùng --force để index lại).", domain, INDEX_VERSION)
             continue
-            
         try:
-            all_tables = await _fetch_all_tables(domain)
-            logger.info(f"Found {len(all_tables)} tables in database for domain {domain}.")
-        except Exception as e:
-            logger.error(f"Failed to fetch tables for domain {domain}: {e}")
-            continue
-        
-        excel_file = f"{domain.upper()}_FINAL.xlsx"
-        import os
-        if os.path.exists(excel_file):
-            excel_metadata = load_excel_metadata(excel_file)
-        else:
-            excel_metadata = {}
-            logger.warning(f"Metadata file {excel_file} not found. Proceeding without metadata.")
+            await index_domain(domain, qdrant, embeddings)
+        except Exception as exc:
+            logger.error("[%s] index thất bại: %s", domain, exc, exc_info=True)
 
-        points = []
-        
-        for idx, table_name in enumerate(all_tables):
-            schema = await _fetch_table_schema(domain, table_name)
-            
-            table_meta = excel_metadata.get(table_name, {})
-            excel_table_desc = table_meta.get("table_desc", "")
-            col_meta_dict = table_meta.get("columns", {})
-            
-            col_vi_parts = []
-            enum_hints = []
-
-            for c in schema["columns"]:
-                c_name = c["name"]
-                c_meta = col_meta_dict.get(c_name, {})
-                vi_name = c_meta.get("vi_name", "")
-                note = c_meta.get("note", "")
-                db_comment = c.get("comment") or ""
-
-                if vi_name or note:
-                    c["excel_vi_name"] = vi_name
-                    c["excel_note"] = note
-
-                label = f"{vi_name} ({c_name})" if vi_name else c_name
-                col_vi_parts.append(label)
-
-                raw_note = note or db_comment
-                if raw_note and "/" in raw_note:
-                    enum_hints.append(f"  - {label} có thể nhận giá trị: {raw_note}")
-
-            if excel_table_desc:
-                schema["excel_table_desc"] = excel_table_desc
-
-            # Sentence 1: table purpose
-            table_label = excel_table_desc if excel_table_desc else table_name
-            db_desc = schema.get("description", "") or ""
-            if db_desc and db_desc != excel_table_desc:
-                sent1 = f"Bảng {table_name} lưu thông tin về {table_label}. {db_desc}"
-            else:
-                sent1 = f"Bảng {table_name} lưu thông tin về {table_label}."
-
-            # Sentence 2: column list
-            cols_str = ", ".join(col_vi_parts)
-            sent2 = f"Các thông tin bao gồm: {cols_str}."
-
-            # Sentence 3 (optional): enum/status hints
-            sent3 = ""
-            if enum_hints:
-                sent3 = "\n" + "\n".join(enum_hints)
-
-            # Sentence 4 (optional): foreign keys
-            fks_str = ""
-            if schema.get("foreign_keys"):
-                fks = [
-                    f"  - {fk['column_name']} liên kết tới bảng {fk['foreign_table']}({fk['foreign_column']})"
-                    for fk in schema["foreign_keys"]
-                    if fk.get("column_name")
-                ]
-                if fks:
-                    fks_str = "\nLiên kết:\n" + "\n".join(fks)
-
-            embed_text = f"{sent1}\n{sent2}{sent3}{fks_str}"
-            
-            vector = embeddings.embed_query(embed_text)
-            
-            payload = {
-                "table_name": table_name,
-                "embed_text": embed_text
-            }
-            
-            points.append(
-                PointStruct(
-                    id=idx + 1,
-                    vector=vector,
-                    payload=payload
-                )
-            )
-            logger.info(f"Generated embedding for table: {table_name} (domain: {domain})")
-
-        if points:
-            qdrant.upsert(
-                collection_name=collection_name,
-                points=points
-            )
-            logger.info(f"Successfully inserted {len(points)} tables into Qdrant for collection {collection_name}.")
-        else:
-            logger.warning(f"No tables were found to index for domain {domain}.")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    asyncio.run(main(args or None, force="--force" in sys.argv))

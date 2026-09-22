@@ -1,5 +1,12 @@
 # Tài liệu Vận hành: Cẩm nang LangGraph Streaming v2
 
+> ⚠️ **TÀI LIỆU NÀY ĐÃ LỆCH VỚI CODE** (kiểm tra 2026-09-15).
+> Nó mô tả kiến trúc **trước** đợt nâng cấp đa DB và streaming. Những chỗ đã khác:
+> - `astream` nay dùng `stream_mode=["updates", "messages"]` để stream token thật
+>
+> Nguồn chân lý hiện tại: **[TRANG_THAI_HIEN_TAI.md](TRANG_THAI_HIEN_TAI.md)**
+
+
 Tài liệu này giải thích chuyên sâu về cơ chế Streaming của kiến trúc LangGraph, đối chiếu với tài liệu gốc của thư viện Langchain và hướng dẫn các kỹ thuật xử lý luồng sự kiện (bao gồm hệ thống kết nối SSE và kỹ thuật xử lý đệm Proxy) đang được ứng dụng trực tiếp tại nhánh Backend dự án NLSQL.
 
 ## 1. Bản chất Streaming của LangGraph

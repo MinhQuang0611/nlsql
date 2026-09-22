@@ -1,4 +1,4 @@
-# from __future__ import annotations
+from __future__ import annotations
 
 # import logging
 # from contextlib import asynccontextmanager
@@ -138,129 +138,92 @@ async def get_internal_db_context() -> AsyncGenerator[AsyncSession, None]:
             raise
 
 async def init_internal_db() -> None:
-    """
-    Khởi tạo database nội bộ:
-    1. Tạo các bảng SQLAlchemy (Conversation, Message, ...)
-    2. Chạy migrations cho LangGraph PostgresSaver (Checkpoint tables)
-    """
-    # 1. Khởi tạo SQLAlchemy models
+    """Tạo các bảng SQLAlchemy nội bộ (Conversation, Message, ...)."""
     import db.models.chat_history  # noqa: F401
     async with internal_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    
-    # 2. Khởi tạo LangGraph checkpoint tables
-    # Sử dụng from_conn_string để đảm bảo setup() chạy trong autocommit mode (cần cho CREATE INDEX CONCURRENTLY)
-    from urllib.parse import quote_plus
-    conn_str = (
-        f"postgresql://{settings.postgres_user}:{quote_plus(settings.postgres_password)}"
-        f"@{settings.postgres_host}:{settings.postgres_port}/{settings.postgres_db}"
-        f"?sslmode=disable"
-    )
-    async with AsyncPostgresSaver.from_conn_string(conn_str) as saver:
-        await saver.setup()
-        
-    logger.info("Khởi tạo schema Internal Postgres và LangGraph checkpointer thành công")
+    logger.info("Khởi tạo schema Internal Postgres thành công")
+
 
 # ---------------------------------------------------------------------------
-# LangGraph Postgres Checkpointer
-# ---------------------------------------------------------------------------
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-from psycopg_pool import AsyncConnectionPool
-
-_checkpoint_saver: AsyncPostgresSaver | None = None
-_checkpoint_pool: AsyncConnectionPool | None = None
-
-@asynccontextmanager
-async def get_checkpoint_saver() -> AsyncGenerator[AsyncPostgresSaver, None]:
-    """
-    Trả về AsyncPostgresSaver (Singleton).
-    """
-    global _checkpoint_saver, _checkpoint_pool
-    if _checkpoint_saver is None:
-        from urllib.parse import quote_plus
-        conn_str = (
-            f"postgresql://{settings.postgres_user}:{quote_plus(settings.postgres_password)}"
-            f"@{settings.postgres_host}:{settings.postgres_port}/{settings.postgres_db}"
-            f"?sslmode=disable"
-        )
-        _checkpoint_pool = AsyncConnectionPool(conn_str, max_size=settings.db_pool_size, open=False)
-        await _checkpoint_pool.open()
-        _checkpoint_saver = AsyncPostgresSaver(_checkpoint_pool)
-        # Note: setup() nên được gọi ở init_internal_db
-    
-    yield _checkpoint_saver
-
-async def close_checkpoint_pool() -> None:
-    global _checkpoint_pool
-    if _checkpoint_pool:
-        await _checkpoint_pool.close()
-        _checkpoint_pool = None
-
-# ---------------------------------------------------------------------------
-# Khởi tạo engine theo active_db
+# Khởi tạo engine theo domain registry
+#
+# Trước đây file này rẽ nhánh MỘT LẦN theo settings.active_db, nên toàn bộ domain
+# buộc phải nằm trên cùng loại engine. Nay mỗi domain tự khai engine của nó
+# (settings.get_domain_engine), cho phép qldt ở ClickHouse còn tcns ở PostgreSQL.
 # ---------------------------------------------------------------------------
 
-domains = ["qldt", "tcns"]
-engines = {}
-AsyncSessionLocals = {}
-_sync_engines = {}
+from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
-if settings.active_db == "clickhouse":
-    # ── ClickHouse: dùng sync engine + HTTP driver ──────────────────────────
-    from sqlalchemy import create_engine
-    from sqlalchemy.engine import Engine as _SyncEngine
+domains = settings.list_domains()
+engines: dict[str, "AsyncEngine"] = {}        # domain postgres -> async engine
+AsyncSessionLocals: dict[str, async_sessionmaker] = {}
+_sync_engines: dict[str, object] = {}          # domain clickhouse -> sync engine
 
-    from urllib.parse import quote_plus
-    
-    for domain in domains:
-        _ch_url = settings.get_database_url_sync(domain)
-        _sync_engines[domain] = create_engine(
-            _ch_url,
+
+def get_domain_engine_type(domain: str) -> str:
+    """'postgres' | 'clickhouse' cho một domain. Domain lạ rơi về engine mặc định."""
+    if domain not in domains:
+        return settings.active_db.strip().lower()
+    return settings.get_domain_engine(domain)
+
+
+def is_clickhouse(domain: str) -> bool:
+    return get_domain_engine_type(domain) == "clickhouse"
+
+
+for _domain in domains:
+    _engine_type = settings.get_domain_engine(_domain)
+
+    if _engine_type == "clickhouse":
+        # ClickHouse: sync engine + HTTP driver (asynch driver không ổn định)
+        _sync_engines[_domain] = create_engine(
+            settings.get_database_url_sync(_domain),
             pool_pre_ping=True,
             echo=settings.db_echo,
         )
-
-    def _ch_run(domain: str, query: str, params: dict | None = None):
-        if domain not in _sync_engines:
-            return []
-        with _sync_engines[domain].connect() as conn:
-            result = conn.execute(text(query), params or {})
-            try:
-                return result.fetchall()
-            except Exception:
-                return []
-
-    async def _ch_execute(domain: str, query: str, params: dict | None = None):
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, _ch_run, domain, query, params)
-
-else:
-    # ── Postgres: async engine + AsyncSession ────────────────────────────────
-    from sqlalchemy.ext.asyncio import (
-        AsyncEngine,
-        AsyncSession,
-        async_sessionmaker,
-        create_async_engine,
-    )
-
-    for domain in domains:
-        _pg_url = settings.get_database_url(domain)
-        
-        engine: AsyncEngine = create_async_engine(
-            _pg_url,
+    else:
+        _pg_engine: AsyncEngine = create_async_engine(
+            settings.get_database_url(_domain),
             pool_size=settings.db_pool_size,
             pool_timeout=settings.db_pool_timeout,
             pool_pre_ping=True,
             echo=settings.db_echo,
             connect_args={"server_settings": {"statement_timeout": "30000"}},
         )
-        engines[domain] = engine
-
-        AsyncSessionLocals[domain] = async_sessionmaker(
-            bind=engine,
+        engines[_domain] = _pg_engine
+        AsyncSessionLocals[_domain] = async_sessionmaker(
+            bind=_pg_engine,
             expire_on_commit=False,
             autoflush=False,
         )
+
+logger.info(
+    "Domain registry: %s",
+    {d: settings.get_domain_engine(d) for d in domains},
+)
+
+
+def _ch_run(domain: str, query: str, params: dict | None = None):
+    if domain not in _sync_engines:
+        return []
+    with _sync_engines[domain].connect() as conn:
+        result = conn.execute(text(query), params or {})
+        try:
+            return result.fetchall()
+        except Exception:
+            return []
+
+
+async def _ch_execute(domain: str, query: str, params: dict | None = None):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _ch_run, domain, query, params)
 
 
 # ---------------------------------------------------------------------------
@@ -268,10 +231,12 @@ else:
 # ---------------------------------------------------------------------------
 
 async def get_db(domain: str = "qldt") -> AsyncGenerator[AsyncSession, None]:
-    if settings.active_db == "clickhouse":
-        raise NotImplementedError("get_db() không hỗ trợ ClickHouse — dùng ch_execute()")
+    if is_clickhouse(domain):
+        raise NotImplementedError(
+            f"get_db() không hỗ trợ ClickHouse (domain={domain}) — dùng ch_execute()"
+        )
     if domain not in AsyncSessionLocals:
-        domain = "qldt"
+        raise KeyError(f"Domain '{domain}' không có engine PostgreSQL trong registry")
     async with AsyncSessionLocals[domain]() as session:
         try:
             yield session
@@ -283,10 +248,12 @@ async def get_db(domain: str = "qldt") -> AsyncGenerator[AsyncSession, None]:
 
 @asynccontextmanager
 async def get_db_context(domain: str = "qldt") -> AsyncGenerator[AsyncSession, None]:
-    if settings.active_db == "clickhouse":
-        raise NotImplementedError("get_db_context() không hỗ trợ ClickHouse — dùng ch_execute()")
+    if is_clickhouse(domain):
+        raise NotImplementedError(
+            f"get_db_context() không hỗ trợ ClickHouse (domain={domain}) — dùng ch_execute()"
+        )
     if domain not in AsyncSessionLocals:
-        domain = "qldt"
+        raise KeyError(f"Domain '{domain}' không có engine PostgreSQL trong registry")
     async with AsyncSessionLocals[domain]() as session:
         try:
             yield session
@@ -303,10 +270,13 @@ async def get_db_context(domain: str = "qldt") -> AsyncGenerator[AsyncSession, N
 async def ch_execute(domain: str, query: str, params: dict | None = None) -> list:
     """
     Chạy raw SQL trên ClickHouse bất đồng bộ.
-    Chỉ dùng khi active_db = 'clickhouse'.
+    Chỉ dùng cho domain có engine = 'clickhouse'.
     """
-    if settings.active_db != "clickhouse":
-        raise NotImplementedError("ch_execute() chỉ dùng khi active_db = 'clickhouse'")
+    if not is_clickhouse(domain):
+        raise NotImplementedError(
+            f"ch_execute() chỉ dùng cho domain ClickHouse — '{domain}' đang là "
+            f"'{get_domain_engine_type(domain)}'"
+        )
     return await _ch_execute(domain, query, params)
 
 
@@ -315,24 +285,50 @@ async def ch_execute(domain: str, query: str, params: dict | None = None) -> lis
 # ---------------------------------------------------------------------------
 
 async def check_db_connection() -> dict:
-    try:
-        versions = {}
-        if settings.active_db == "clickhouse":
-            for domain in domains:
+    """
+    Kiểm tra từng domain độc lập. Một domain hỏng không làm cả hệ thống báo lỗi —
+    trước đây vòng lặp nằm trong một try chung nên domain đầu tiên fail là dừng hết.
+    """
+    versions: dict[str, str] = {}
+    failures: dict[str, str] = {}
+
+    for domain in domains:
+        try:
+            if is_clickhouse(domain):
                 rows = await _ch_execute(domain, "SELECT version()")
-                versions[domain] = rows[0][0] if rows else "unknown"
-        else:
-            for domain, eng in engines.items():
-                async with eng.connect() as conn:
+                versions[domain] = str(rows[0][0]) if rows else "unknown"
+                table_rows = await _ch_execute(domain, "SHOW TABLES")
+            else:
+                async with engines[domain].connect() as conn:
                     result = await conn.execute(text("SELECT version()"))
-                    versions[domain] = result.scalar()
+                    versions[domain] = str(result.scalar())
+                    table_rows = (await conn.execute(text(
+                        "SELECT table_name FROM information_schema.tables "
+                        "WHERE table_schema = 'public' AND table_type = 'BASE TABLE'"
+                    ))).fetchall()
 
-        logger.info("Kết nối %s thành công. Versions: %s", settings.active_db, versions)
-        return {"status": "ok", "version": str(versions), "detail": ""}
+            # Database tồn tại nhưng rỗng vẫn kết nối được — và router sẽ vẫn
+            # route câu hỏi vào đó rồi fail ở bước lấy schema. Cảnh báo sớm để dễ chẩn đoán.
+            if not table_rows:
+                logger.warning(
+                    "Domain '%s' kết nối được nhưng KHÔNG CÓ BẢNG NÀO (db=%s). "
+                    "Mọi câu hỏi route vào domain này sẽ thất bại. "
+                    "Cân nhắc bỏ nó khỏi DOMAINS_ENABLED cho tới khi có dữ liệu.",
+                    domain, settings.get_db_name(domain),
+                )
+        except Exception as exc:
+            failures[domain] = str(exc)
+            logger.error("Kết nối domain '%s' thất bại: %s", domain, exc)
 
-    except Exception as exc:
-        logger.error("Kết nối %s thất bại: %s", settings.active_db, exc)
-        return {"status": "error", "version": "", "detail": str(exc)}
+    if versions:
+        logger.info("Kết nối DB OK cho domain: %s", list(versions))
+    if failures:
+        return {
+            "status": "degraded" if versions else "error",
+            "version": str(versions),
+            "detail": str(failures),
+        }
+    return {"status": "ok", "version": str(versions), "detail": ""}
 
 
 # ---------------------------------------------------------------------------
@@ -340,14 +336,14 @@ async def check_db_connection() -> dict:
 # ---------------------------------------------------------------------------
 
 async def init_db() -> None:
-    if settings.active_db == "clickhouse":
-        logger.info("ClickHouse: bỏ qua init_db() — tạo bảng thủ công nếu cần")
+    if not engines:
+        logger.info("Không có domain PostgreSQL — bỏ qua init_db()")
         return
 
     for domain, eng in engines.items():
         async with eng.begin() as conn:
             pass
-    logger.info("Khởi tạo schema External Postgres thành công")
+    logger.info("Khởi tạo schema External Postgres thành công cho: %s", list(engines))
 
 
 # ---------------------------------------------------------------------------
@@ -356,14 +352,14 @@ async def init_db() -> None:
 
 async def close_db() -> None:
     await internal_engine.dispose()
-    await close_checkpoint_pool()
-    logger.info("Đã đóng kết nối Internal Postgres và Checkpoint Pool")
+    logger.info("Đã đóng kết nối Internal Postgres")
 
-    if settings.active_db == "clickhouse":
-        for domain, eng in _sync_engines.items():
-            eng.dispose()
-        logger.info("Đã đóng kết nối ClickHouse")
-    else:
-        for domain, eng in engines.items():
-            await eng.dispose()
-        logger.info("Đã đóng kết nối Postgres")
+    for domain, eng in _sync_engines.items():
+        eng.dispose()
+    if _sync_engines:
+        logger.info("Đã đóng kết nối ClickHouse: %s", list(_sync_engines))
+
+    for domain, eng in engines.items():
+        await eng.dispose()
+    if engines:
+        logger.info("Đã đóng kết nối Postgres: %s", list(engines))

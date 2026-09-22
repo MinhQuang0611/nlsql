@@ -11,7 +11,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
 from config import get_settings
-from agents.schema_agent import _fetch_all_tables, _fetch_table_schema
+from db.introspect import fetch_all_tables as _fetch_all_tables, fetch_table_schema as _fetch_table_schema
 from scripts.index_schema import load_excel_metadata
 
 logging.basicConfig(level=logging.INFO)

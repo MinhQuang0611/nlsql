@@ -1,5 +1,13 @@
 # Tài liệu Kiến trúc Hệ thống NLSQL (Cập nhật)
 
+> ⚠️ **TÀI LIỆU NÀY ĐÃ LỆCH VỚI CODE** (kiểm tra 2026-09-15).
+> Nó mô tả kiến trúc **trước** đợt nâng cấp đa DB và streaming. Những chỗ đã khác:
+> - thiếu 2 node mới `domain_router` và `data_check`
+> - `ACTIVE_DB` không còn là biến global — mỗi domain tự khai engine
+>
+> Nguồn chân lý hiện tại: **[TRANG_THAI_HIEN_TAI.md](TRANG_THAI_HIEN_TAI.md)**
+
+
 Tài liệu này mô tả chi tiết kiến trúc Agentic Workflow của hệ thống NLSQL, sử dụng LangGraph để điều phối các AI Agent chuyên biệt.
 
 ## 1. Sơ đồ Luồng Hoạt động (Workflow Diagram)

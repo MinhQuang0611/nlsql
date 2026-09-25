@@ -73,7 +73,7 @@ def _search_faq(user_query: str) -> tuple[dict|None, list[str]]:
         return None, []
 
 
-async def faq_agent(state: AgentState) -> AgentState:
+async def faq_agent(state: AgentState) -> dict:
     user_query = state.get("user_query", "")
     logger.info(f"[FAQAgency] Đang tìm kiếm FAQ cho: {user_query}")
 
@@ -82,7 +82,6 @@ async def faq_agent(state: AgentState) -> AgentState:
     if best_hit:
         logger.info(f"[FAQAgency] Trúng FAQ! Score: {best_hit['score']}")
         return {
-            **state,
             "intent": "faq_answered",
             "answer": best_hit["answer"],
             "answer_format": "text",
@@ -90,4 +89,4 @@ async def faq_agent(state: AgentState) -> AgentState:
         }
 
     logger.info("[FAQAgency] Không trúng FAQ, chuyển sang xử lý mặc định.")
-    return state
+    return {}

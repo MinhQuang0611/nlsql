@@ -1,0 +1,101 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SSE stream test</title>
+<style>
+  body{font:14px/1.5 system-ui,sans-serif;margin:24px;background:#0f1115;color:#e6e6e6}
+  h1{font-size:17px;margin:0 0 4px}
+  p.note{color:#9aa0a6;margin:0 0 16px}
+  input,button{font:inherit;padding:7px 10px;border-radius:6px;border:1px solid #333;background:#1a1d23;color:#e6e6e6}
+  button{cursor:pointer;background:#2b6cb0;border-color:#2b6cb0}
+  button:disabled{opacity:.5;cursor:default}
+  #answer{white-space:pre-wrap;background:#141922;border:1px solid #263041;border-radius:6px;padding:12px;margin:16px 0;min-height:52px}
+  table{border-collapse:collapse;width:100%;font-family:ui-monospace,monospace;font-size:12px}
+  th,td{text-align:left;padding:3px 8px;border-bottom:1px solid #222}
+  th{color:#9aa0a6;font-weight:500}
+  td.t{color:#7fd1a0;white-space:nowrap}
+  td.ev{white-space:nowrap}
+  .tok{color:#e0a458}
+  #verdict{margin:12px 0;padding:10px 12px;border-radius:6px;font-weight:600}
+  .ok{background:#12301e;color:#6ee7a0;border:1px solid #1f5c38}
+  .bad{background:#3a1616;color:#ff8f8f;border:1px solid #6e2626}
+</style>
+
+<h1>SSE stream test — /api/v1/chat/stream</h1>
+<p class="note">
+  Trang này đọc stream đúng cách (<code>getReader()</code>, xử lý từng chunk).
+  Cột "t" là số giây kể từ lúc gửi request. Nếu ở đây các mốc thời gian TĂNG DẦN mà
+  client của bạn cho ra thời gian giống hệt nhau, thì client của bạn đang đọc hết body
+  rồi mới tách dòng — server không có lỗi.
+</p>
+
+<input id="q" size="52" value="Liệt kê 5 ngành nhiều sinh viên nhất và nhận xét">
+<button id="go">Gửi</button>
+
+<div id="verdict"></div>
+<div id="answer"></div>
+<table><thead><tr><th style="width:80px">t</th><th style="width:130px">event</th><th>nội dung</th></tr></thead><tbody id="rows"></tbody></table>
+
+<script>
+const $ = s => document.querySelector(s);
+
+$('#go').onclick = async () => {
+  const btn = $('#go'); btn.disabled = true;
+  $('#rows').innerHTML = ''; $('#answer').textContent = ''; $('#verdict').textContent = '';
+
+  const t0 = performance.now();
+  const stamps = [];
+  const row = (ev, text, cls) => {
+    const t = (performance.now() - t0) / 1000;
+    stamps.push(t);
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td class="t">${t.toFixed(2)}s</td><td class="ev ${cls||''}">${ev}</td><td>${text}</td>`;
+    $('#rows').appendChild(tr);
+  };
+
+  const res = await fetch('/api/v1/chat/stream', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({query: $('#q').value, session_id: 'stream-test-' + Date.now(), num_recommend: 0}),
+  });
+
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '', answerStarted = false;
+
+  while (true) {
+    const {value, done} = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, {stream: true});
+    const parts = buf.split('\n\n');
+    buf = parts.pop() || '';
+    for (const part of parts) {
+      if (!part.startsWith('data: ')) continue;
+      let d;
+      try { d = JSON.parse(part.slice(6)); }
+      catch (e) { row('PARSE FAIL', part.slice(6, 120), 'bad'); continue; }
+
+      if (d.event === 'answer_token') {
+        answerStarted = true;
+        $('#answer').textContent += d.token;
+        row('answer_token', JSON.stringify(d.token), 'tok');
+      } else if (d.event === 'node_finish') {
+        // KHÔNG xoá #answer ở đây: token của node answer tới TRƯỚC node_finish của nó.
+        row('node_finish', d.node + '  ' + Object.keys(d.state_update || {}).join(', '));
+      } else if (d.event === 'final_result') {
+        row('final_result', JSON.stringify(d.data.answer).slice(0, 90));
+        const streamed = $('#answer').textContent;
+        const match = streamed === d.data.answer;
+        const spread = stamps.length > 1 ? stamps[stamps.length - 1] - stamps[0] : 0;
+        const v = $('#verdict');
+        v.className = spread > 0.5 ? 'ok' : 'bad';
+        v.textContent = spread > 0.5
+          ? `STREAM OK — ${stamps.length} event trải trên ${spread.toFixed(1)}s. Token khớp final_result: ${match}.`
+          : `KHÔNG STREAM — tất cả ${stamps.length} event tới trong ${spread.toFixed(2)}s. Có gì đó đang gom response.`;
+      } else {
+        row(d.event, JSON.stringify(d).slice(0, 100));
+      }
+    }
+  }
+  btn.disabled = false;
+};
+</script>

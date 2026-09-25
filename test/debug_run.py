@@ -11,7 +11,9 @@ async def test_run():
     state = {
         "user_query": test_query,
         "session_id": str(uuid.uuid4()),
-        "retry_count": 0
+        "retry_count": 0,
+        "data_retry_count": 0,
+        "history": [],
     }
     
     print(f"Testing Query: {test_query}")
@@ -19,7 +21,7 @@ async def test_run():
         final_state = await app.ainvoke(state)
         print("\n--- Final State ---")
         print(f"Intent: {final_state.get('intent')}")
-        print(f"SQL Plan:\n{final_state.get('query_plan')}")
+        print(f"SQL Plan:\n{final_state.get('sql_reasoning')}")
         print(f"Generated SQL:\n{final_state.get('generated_sql')}")
         
         correction = final_state.get('sql_correction')

@@ -9,63 +9,52 @@ Hệ thống được thiết kế theo kiến trúc **Mạng lưới Đa Tác N
 *   **LLM Engine:** OpenAI API (`gpt-4o-mini`).
 *   **Orchestration:** LangChain & LangGraph (Quản lý luồng multi-agents, theo dõi tiến trình state).
 *   **Vector Database:** Qdrant (Lập chỉ mục và truy xuất Schema & Truy vấn mẫu/Few-shot).
-*   **Cơ Sở Dữ Liệu Thực Thi:** PostgreSQL (Kết nối bất đồng bộ qua `asyncpg` và `SQLAlchemy`).
+*   **Cơ Sở Dữ Liệu Thực Thi:** Đa nguồn qua **Domain Registry** — mỗi domain (`qldt`, `tcns`) tự khai engine riêng (PostgreSQL qua `asyncpg`, hoặc ClickHouse qua HTTP driver). Xem `config.DomainConfig`.
 *   **Web Framework (API):** FastAPI (Hỗ trợ cấu trúc Asynchronous API).
 
 ---
 
 ## CƠ CHẾ HOẠT ĐỘNG: QUY TRÌNH XỬ LÝ ĐA TÁC NHÂN TỪNG BƯỚC
 
-Mỗi truy vấn đi qua sơ đồ LangGraph gồm các bước chính sau. Từ một người dùng gửi lệnh Chat, trạng thái (State) sẽ tuần tự truyền qua cho tới khi hoàn tất (`END`).
+Mỗi truy vấn đi qua sơ đồ LangGraph gồm các node sau. Một câu hỏi dữ liệu thông thường tốn **3 lượt gọi LLM** (`router`, `sql_gen`, `answer`) và kết thúc trong ~7–11s.
 
-### 1. Phân loại Ý Định (Intent Agent)
-*   **Nhiệm vụ:** Là điểm bắt đầu (`START`). Agent này nhận câu hỏi thô từ người dùng và phân tích ý định để quyết định luồng đi tiếp theo.
-*   **Các loại Ý Định:**
-    *   `data_query`: Truy vấn lấy số liệu, dữ liệu bảng.
-    *   `chart_request`: Yêu cầu vẽ biểu đồ (vd: "Vẽ biểu đồ tròn hiển thị...").
-    *   `schema_question`: Câu hỏi về kiến trúc dữ liệu (vd: "Bảng nào chứa sinh viên?").
-    *   `ambiguous`: Câu hỏi mơ hồ, thiếu thông tin chuyên môn.
-    *   `greeting`: Câu chào hỏi thông thường.
-    *   `out_of_scope`: Câu hỏi không liên quan tới hệ thống dữ liệu.
-*   **Cơ chế Điều Hướng (Routing):**
-    *   `data_query`, `chart_request`, `schema_question` ➔ Chuyển qua **Schema Agent**.
-    *   `ambiguous` ➔ Chuyển sang **Clarification Agent** để xin làm rõ.
-    *   `greeting`, `out_of_scope` ➔ Chuyển thẳng về **Answer Agent** (Bỏ qua truy vấn cơ sở dữ liệu).
+### 0. FAQ (không LLM)
+So khớp câu hỏi với `faq_collection` trên Qdrant. Trúng (score ≥ 0.70) → trả lời ngay, kết thúc.
 
-### 2. Trích xuất Ngữ Cảnh Dữ Liệu (Schema Agent)
-*   **Nhiệm vụ:** Tìm cấu trúc Table (Bảng) phù hợp với yêu cầu để không nhồi nhét toàn bộ database vào prompt của LLM gây nhiễu loạn.
-*   **Cơ chế Sematic Search:** Hệ thống sử dụng tìm kiếm qua Vector Database (Qdrant) để lấy Top các bảng sát nghĩa với câu hỏi nhất, bao gồm Tên bảng, Chức năng (Description), Cấu trúc cột, và Các Foreign Keys.
-*   **Điều Hướng:** 
-    *   Trừ trường hợp ý định chỉ là `schema_question` (chuyển thẳng tới **Answer Agent** để giải đáp), hệ thống sẽ chuyển cấu trúc (schemas) này sang cho **SQL Generation Agent**.
+### 1. Router (1 LLM)
+Một lượt gọi structured output trả về đồng thời:
+*   **`domain`** — cơ sở dữ liệu cần dùng (`qldt` / `tcns`), chỉ hỏi LLM khi endpoint chung `/chat` được gọi và registry có > 1 domain. Các endpoint `/qldt/chat`, `/tcns/chat` gán domain sẵn.
+*   **`intent`** — `data_query`, `chart_request`, `schema_question`, `knowledge_query`, `domain_query`, `greeting`, `out_of_scope`, `ambiguous`.
+*   **`clarification_question`** — khi `ambiguous`, router đặt luôn câu hỏi làm rõ vào `answer` và kết thúc.
+*   **Điều hướng:** `data_query` / `chart_request` / `domain_query` ➔ **Schema** + **Knowledge** (song song); `schema_question` ➔ Schema; `knowledge_query` ➔ Knowledge; `greeting` / `out_of_scope` ➔ Answer (câu soạn sẵn, không LLM).
 
-### 3. Tạo Sinh SQL (SQL Generation Agent)
-*   **Nhiệm vụ:** Viết các câu SQL thô từ Text thông qua dữ kiện Schema đã trích xuất, có đính kèm thêm các Query Mẫu (Few-shot) để AI bắt chước tư duy.
-*   **Cơ chế Self-Consistency:** Không chỉ tạo một kết quả, nó sẽ tạo ra nhiều phiên bản câu truy vấn SQL khác nhau trong cùng một lúc, đọ chéo (majority voting) độ tin cậy để chọn lọc được câu lệnh tốt nhất. 
-*   **Điều Hướng:** Chuyển câu truy vấn tới kiểm định ở **SQL Check Agent**.
+### 2. Schema Agent & Knowledge Agent (song song)
+*   **Schema:** semantic search trên `schema_collection_<domain>` lấy bảng liên quan (tên bảng, mô tả, cột, FK, sample). Có fallback LLM khi vector search không đủ bảng.
+*   **Knowledge:** RAG quy định nghiệp vụ từ `knowledge_collection`. Với `knowledge_query` node này tự sinh câu trả lời và kết thúc; với các intent khác nó chỉ nạp `business_context` cho bước sinh SQL.
 
-### 4. Kiểm Định Cú Pháp SQL (SQL Check Agent)
-*   **Nhiệm vụ:** Kiểm tra "về mặt tĩnh" xem câu SQL có chạy được không (Syntax check) mà không sửa đổi dữ liệu (vd: Dùng hàm `EXPLAIN ...` trên PostgreSQL).
-*   **Phản Vệ (Self-Correction):** 
-    *   Nếu SQL bị sai (Invalid), nhận Error Log từ Engine Database và trả lại cho **SQL Generation Agent** sửa đổi (Self-Refine). Giới hạn tối đa là 3 lần sửa.
-    *   Nếu SQL đúng (Hợp lệ), chuyển tới **Executor Agent**.
+### 3. SQL Generation (1 LLM)
+Một lượt gọi structured output gồm hai field theo thứ tự: **`plan`** (kế hoạch 6 bước: bảng → cột → lọc → JOIN → tổng hợp → sắp xếp, có ràng buộc *không tự thêm điều kiện lọc*) rồi **`sql`**. Prompt kèm schema, quy định nghiệp vụ, 3 ví dụ few-shot gần nghĩa nhất từ `few_shot_collection_<domain>`, và khối quy tắc theo dialect (`prompts/dialect.py`).
 
-### 5. Thực thi Cơ Sở Dữ Liệu (Executor Agent)
-*   **Nhiệm vụ:** Thiết lập kết nối Asyncới PostgreSQL và thi hành truy vấn bằng lệnh SQL hoàn chỉnh. Thu thập kết quả dưới dang dictionary `List[Dict[str, Any]]`, đo lường thời gian (execution_time_ms) và đếm tổng số dòng (row_count).
-*   **Điều Hướng:** Đi tới **Chart Agent**.
+### 4. SQL Check (không LLM)
+Chốt chặn lệnh ghi (regex) + `EXPLAIN` dry-run trên đúng engine của domain. Lỗi ➔ thông báo lỗi của DB được đưa nguyên về **SQL Generation** để sinh lại (tối đa 3 lần). Hết lượt ➔ Answer báo không tạo được truy vấn.
 
-### 6. Xử lý & Khởi tạo Biểu Đồ (Chart Agent)
-*   **Nhiệm vụ:** Nếu Intent của người dùng ban đầu rơi vào `chart_request` (Hoặc đôi khi hệ thống tự phán đoán dữ liệu hợp với chart hơn qua cờ `force_chart`).
-*   **Cơ chế Mapping:** Đọc dữ liệu thô từ Executor, đồng thời phân nhóm kiểu (Categorical vs Numerical) qua Data Profiling để tự động gán trục X, trục Y, kiểu đồ thị (bar, line, pie, number, table, v.v.). Output là chuẩn `ChartConfig` rõ ràng.
+### 5. Executor (không LLM)
+Chạy SQL, cache Redis theo `(engine, domain, db, sql)`, giới hạn 1000 dòng, log EXPLAIN ANALYZE cho query chậm.
 
-### 7. Phản hồi Thông Minh (Answer Agent) & Làm rõ (Clarification Agent)
-*   **Answer Agent:** Đóng vai trò tổng kết. Tổng hợp thông tin từ chuỗi quá trình: Bảng Raw Data của DB, hoặc Setup Biểu Đồ của Chart Agent để định dạng format `text`, `table` hoặc `chart+text` trả về cho Interface của user với ngôn từ chuyên nghiệp. **(Hoàn thành & END)**.
-*   **Clarification Agent:** Nằm ngoài luồng dữ liệu, nếu Intent Agent phát hiện `ambiguous` (Mơ hồ), Agent này lấy yêu cầu và tự đặt ra câu hỏi ngược lại yêu cầu sự giải thích (Clarification question) cho người dùng.
+### 5b. Data Check (không LLM)
+Kiểm định kết quả: lỗi thực thi, 0 dòng, một ô NULL, toàn NULL ➔ đẩy về SQL Generation kèm lý do, **tối đa 1 lần** (0 dòng đôi khi là câu trả lời đúng).
+
+### 6. Chart (không LLM, trừ khi người dùng xin biểu đồ)
+Chọn kiểu biểu đồ và trục bằng luật từ `column_profiles` (1 ô số → `number`; cột thời gian + số → `line`; hỏi "tỉ lệ" và ≤ 8 nhóm → `pie`; dimension + số → `bar`; 2 số → `scatter`; còn lại `table`). Chỉ gọi LLM khi intent là `chart_request` (hoặc API ép chart) **và** dữ liệu có nhiều cách map trục.
+
+### 7. Answer (1 LLM, stream)
+Viết câu trả lời text thuần bằng tiếng Việt và stream từng token ra client. `answer_format` (`text` / `table` / `chart+text`) được tính bằng luật từ `chart_config` và số dòng.
 
 ---
 
 ## CẤU TRÚC THƯ MỤC DỰ ÁN (FOLDER STRUCTURE)
 
-*   📁 `agents/`: Chứa kịch bản & logic khởi chạy từng LangGraph Node (vd: `intent_agent.py`, `sql_gen_agent.py`,...).
+*   📁 `agents/`: Chứa logic từng LangGraph Node (vd: `router_agent.py`, `sql_gen_agent.py`,...).
 *   📁 `api/`: Lớp Web Framework mở bằng FastAPI. Chứa các `routers` API (Chat, Database Schemas, Chart).
 *   📁 `graph/`: Định nghĩa sườn Mạng lưới Đa Tác Nhân sử dụng LangGraph (`builder.py`, thiết lập biến số chia sẻ trong `state.py`).
 *   📁 `prompts/`: Tổng hợp các tập lệnh cho từng tính cách Prompting của từng LLM Agent.

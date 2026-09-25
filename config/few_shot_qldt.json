@@ -1,0 +1,42 @@
+[
+  {
+    "question": "Có bao nhiêu sinh viên đang học?",
+    "sql": "SELECT count() AS soSinhVien FROM `SinhVien` WHERE `trangThaiHoc` = 'Đang học'"
+  },
+  {
+    "question": "Thống kê số lượng sinh viên theo từng ngành, sắp xếp giảm dần",
+    "sql": "SELECT `n`.`ten` AS `tenNganh`, count() AS `soSinhVien` FROM `SinhVien` AS `sv` INNER JOIN `Nganh` AS `n` ON `sv`.`maNganh` = `n`.`ma` GROUP BY `n`.`ten` ORDER BY `soSinhVien` DESC LIMIT 100"
+  },
+  {
+    "question": "Top 5 ngành có nhiều sinh viên nhập học năm 2024 nhất",
+    "sql": "SELECT `n`.`ten` AS `tenNganh`, count() AS `soSinhVien` FROM `SinhVien` AS `sv` INNER JOIN `Nganh` AS `n` ON `sv`.`maNganh` = `n`.`ma` WHERE `sv`.`namNhapHoc` = 2024 GROUP BY `n`.`ten` ORDER BY `soSinhVien` DESC LIMIT 5"
+  },
+  {
+    "question": "Tỉ lệ sinh viên nam nữ theo ngành",
+    "sql": "SELECT `n`.`ten` AS `tenNganh`, countIf(`sv`.`gioiTinh` = 'Nam') AS `soNam`, countIf(`sv`.`gioiTinh` = 'Nữ') AS `soNu`, round(toFloat64(countIf(`sv`.`gioiTinh` = 'Nam')) * 100 / count(), 2) AS `tiLeNamPhanTram` FROM `SinhVien` AS `sv` INNER JOIN `Nganh` AS `n` ON `sv`.`maNganh` = `n`.`ma` GROUP BY `n`.`ten` ORDER BY `tenNganh` LIMIT 100"
+  },
+  {
+    "question": "Có bao nhiêu sinh viên có GPA hệ 4 trên 3.6?",
+    "sql": "SELECT count(DISTINCT `sinhVienSsoId`) AS `soSinhVien` FROM `KqhtTichLuy` WHERE `trungBinhThang4` > 3.6"
+  },
+  {
+    "question": "Danh sách 20 sinh viên có điểm tích luỹ hệ 4 cao nhất",
+    "sql": "SELECT `sv`.`ma` AS `maSinhVien`, `sv`.`ten` AS `hoTen`, `kq`.`trungBinhThang4` AS `gpa` FROM `KqhtTichLuy` AS `kq` INNER JOIN `SinhVien` AS `sv` ON `kq`.`sinhVienSsoId` = `sv`.`ssoId` ORDER BY `kq`.`trungBinhThang4` DESC LIMIT 20"
+  },
+  {
+    "question": "Điểm trung bình học phần theo từng mã học phần",
+    "sql": "SELECT `maHocPhan`, round(avg(`diemTongKet`), 2) AS `diemTrungBinh`, count() AS `soLuotHoc` FROM `DiemHocPhan` GROUP BY `maHocPhan` ORDER BY `soLuotHoc` DESC LIMIT 100"
+  },
+  {
+    "question": "Tỉ lệ đạt của từng học phần là bao nhiêu?",
+    "sql": "SELECT `maHocPhan`, count() AS `tongSoLuot`, countIf(`diemTongKet` >= 4.0) AS `soLuotDat`, round(toFloat64(countIf(`diemTongKet` >= 4.0)) * 100 / count(), 2) AS `tiLeDatPhanTram` FROM `DiemHocPhan` GROUP BY `maHocPhan` HAVING `tongSoLuot` > 10 ORDER BY `tiLeDatPhanTram` ASC LIMIT 100"
+  },
+  {
+    "question": "Số sinh viên nhập học theo từng năm",
+    "sql": "SELECT `namNhapHoc`, count() AS `soSinhVien` FROM `SinhVien` WHERE `namNhapHoc` > 0 GROUP BY `namNhapHoc` ORDER BY `namNhapHoc` DESC LIMIT 100"
+  },
+  {
+    "question": "Phân bố sinh viên theo tỉnh thành quê quán",
+    "sql": "SELECT `tinhTpQueQuan`, count() AS `soSinhVien` FROM `SinhVien` WHERE `tinhTpQueQuan` != '' GROUP BY `tinhTpQueQuan` ORDER BY `soSinhVien` DESC LIMIT 100"
+  }
+]

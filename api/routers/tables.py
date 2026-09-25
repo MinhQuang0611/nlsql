@@ -2,7 +2,7 @@ import logging
 import pandas as pd
 from typing import Dict
 from fastapi import APIRouter, HTTPException, Query
-from agents.schema_agent import _fetch_all_tables
+from db.introspect import fetch_all_tables as _fetch_all_tables
 import os
 
 logger = logging.getLogger(__name__)

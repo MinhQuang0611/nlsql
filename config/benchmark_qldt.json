@@ -1,0 +1,50 @@
+[
+  {
+    "question": "Tổng số sinh viên trong hệ thống là bao nhiêu?",
+    "gold_sql": "SELECT count() AS soSinhVien FROM `SinhVien`"
+  },
+  {
+    "question": "Hiện có bao nhiêu ngành đào tạo?",
+    "gold_sql": "SELECT count() AS soNganh FROM `Nganh`"
+  },
+  {
+    "question": "Có bao nhiêu sinh viên nữ?",
+    "gold_sql": "SELECT countIf(`gioiTinh` = 'Nữ') AS soSinhVienNu FROM `SinhVien`"
+  },
+  {
+    "question": "Đếm số sinh viên theo từng trạng thái học, chỉ lấy trạng thái và số lượng",
+    "gold_sql": "SELECT `trangThaiHoc`, count() AS soLuong FROM `SinhVien` GROUP BY `trangThaiHoc` ORDER BY soLuong DESC"
+  },
+  {
+    "question": "Điểm trung bình hệ 4 của toàn bộ sinh viên là bao nhiêu, làm tròn 2 chữ số?",
+    "gold_sql": "SELECT round(avg(`trungBinhThang4`), 2) AS diemTrungBinhHe4 FROM `KqhtTichLuy`"
+  },
+  {
+    "question": "Có bao nhiêu sinh viên tích luỹ được trên 40 tín chỉ?",
+    "gold_sql": "SELECT count(DISTINCT `sinhVienSsoId`) AS soSinhVien FROM `KqhtTichLuy` WHERE `tongSoTinChi` > 40"
+  },
+  {
+    "question": "Có bao nhiêu sinh viên nhập học năm 2023?",
+    "gold_sql": "SELECT count() AS soSinhVien FROM `SinhVien` WHERE `namNhapHoc` = 2023"
+  },
+  {
+    "question": "Đếm số bản ghi kết quả học tập theo từng loại học lực, trả về học lực và số lượng",
+    "gold_sql": "SELECT `hocLuc`, count() AS soLuong FROM `KqhtTichLuy` GROUP BY `hocLuc` ORDER BY soLuong DESC"
+  },
+  {
+    "question": "Học phần nào có nhiều lượt học nhất? Trả về mã học phần và số lượt.",
+    "gold_sql": "SELECT `maHocPhan`, count() AS soLuot FROM `DiemHocPhan` GROUP BY `maHocPhan` ORDER BY soLuot DESC LIMIT 1"
+  },
+  {
+    "question": "Có tất cả bao nhiêu khoá ngành?",
+    "gold_sql": "SELECT count() AS soKhoaNganh FROM `KhoaNganh`"
+  },
+  {
+    "question": "Số lượng sinh viên quốc tịch Việt Nam là bao nhiêu?",
+    "gold_sql": "SELECT countIf(`quocTich` = 'Việt Nam') AS soSinhVien FROM `SinhVien`"
+  },
+  {
+    "question": "Điểm tổng kết cao nhất và thấp nhất trong bảng điểm học phần là bao nhiêu?",
+    "gold_sql": "SELECT max(`diemTongKet`) AS diemCaoNhat, min(`diemTongKet`) AS diemThapNhat FROM `DiemHocPhan`"
+  }
+]

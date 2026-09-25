@@ -4,7 +4,6 @@ from typing import Any, Literal, Optional
 from typing_extensions import TypedDict
 
 
-
 class TableColumn(TypedDict, total=False):
     name: str
     type: str
@@ -25,9 +24,9 @@ class TableSchema(TypedDict, total=False):
 
 class ChartConfig(TypedDict):
     chart_type: Literal["bar", "line", "pie", "table", "number", "scatter"]
-    x_axis: Optional[str]       
-    y_axis: Optional[str]      
-    group_by: Optional[str]     
+    x_axis: Optional[str]
+    y_axis: Optional[str]
+    group_by: Optional[str]
     title: str
     x_label: Optional[str]
     y_label: Optional[str]
@@ -36,61 +35,65 @@ class ChartConfig(TypedDict):
 class SQLCorrectionResult(TypedDict):
     is_valid: bool
     issues: list[str]
-    fixed_sql: Optional[str]    
+    fixed_sql: Optional[str]
 
+
+Intent = Literal[
+    "data_query",
+    "chart_request",
+    "schema_question",
+    "knowledge_query",
+    "domain_query",
+    "greeting",
+    "out_of_scope",
+    "ambiguous",
+    "faq_answered",
+]
 
 
 class AgentState(TypedDict, total=False):
-    user_query: str                  
-    session_id: str                  
-    selected_tables: Optional[list[str]]
+    # ── Input ────────────────────────────────────────────────────────────
+    user_query: str
+    session_id: str
+    history: list[dict]                      # [{"role": "user"/"assistant", "content": ...}]
+    selected_tables: Optional[list[str]]     # /chat_with_table: giới hạn bảng
+    forced_chart_type: Optional[str]         # ép kiểu biểu đồ
+    force_chart: bool                        # cho phép chart_agent hỏi LLM dù intent không phải chart_request
 
-    intent: Literal[
-        "data_query",        
-        "chart_request",    
-        "schema_question",
-        "greeting",
-        "out_of_scope",      
-        "ambiguous",
-        "faq_answered",
-    ]
-    intent_reasoning: str            
+    # ── router ───────────────────────────────────────────────────────────
+    # Domain = một nguồn dữ liệu trong registry (config.Settings.list_domains()).
+    # Được set sẵn bởi endpoint /<domain>/chat, hoặc do router_agent chọn.
+    domain: str
+    domain_reasoning: Optional[str]
+    intent: Intent
+    clarification_question: Optional[str]
 
-    relevant_tables: list[str]      
-    schema_context: list[TableSchema]  
-    pruned_schema_context: list[TableSchema] 
+    # ── retrieval ────────────────────────────────────────────────────────
+    relevant_tables: list[str]
+    schema_context: list[TableSchema]
+    knowledge_context: Optional[str]
     business_context: list[dict]
-    
-    query_plan: str
 
-    generated_sql: str              
-    sql_reasoning: str               
+    # ── sql ──────────────────────────────────────────────────────────────
+    generated_sql: str
+    sql_reasoning: str                       # kế hoạch suy luận (plan) của sql_gen
+    sql_correction: SQLCorrectionResult
+    final_sql: str
+    retry_count: int                         # số lần sql_check từ chối
 
-    sql_correction: SQLCorrectionResult       
-    final_sql: str                  
-
-    query_result: list[dict[str, Any]]  
+    # ── execute / data_check ─────────────────────────────────────────────
+    query_result: list[dict[str, Any]]
     row_count: int
     execution_time_ms: float
-    executor_error: Optional[str]    
-
+    executor_error: Optional[str]
     data_check_is_valid: bool
     data_check_issues: list[str]
+    data_retry_count: int                    # số lần data_check từ chối
 
-    forced_chart_type: Optional[str]        # Hint từ API: ép buộc chart type nếu có
-    force_chart: bool                        # Nếu True, luôn sinh chart dù intent không phải chart_request
-    column_profiles: Optional[list[dict]]    # Output của data_profiler — phân tích kiểu cột
-    chart_config: Optional[ChartConfig] 
-    chart_data: Optional[list[dict]]    
-
-    history: list[dict]                      # Lịch sử hội thoại [{"role": "user/assistant", "content": "..."}]
-    knowledge_context: Optional[str]         # Kết quả RAG từ Knowledge Agent (dùng cho domain_query / knowledge_query)
-    clarification_question: Optional[str]  # Câu hỏi làm rõ khi intent là ambiguous
-    recommend_questions: Optional[list[str]] # Các gợi ý câu hỏi liên quan (VD: FAQ gần nhất)
-
-    answer: str                      
+    # ── chart / answer ───────────────────────────────────────────────────
+    column_profiles: Optional[list[dict]]
+    chart_config: Optional[ChartConfig]
+    chart_data: Optional[list[dict]]
+    recommend_questions: Optional[list[str]]
+    answer: str
     answer_format: Literal["text", "table", "chart+text"]
-
-    retry_count: int               
-    error: Optional[str]           
-    next: str                        

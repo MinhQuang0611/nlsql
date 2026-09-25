@@ -49,6 +49,7 @@ async def generate_chart(request: ChartRequest) -> ChartResponse:
             user_query=request.user_query,
             query_result=request.data,
             forced_chart_type=request.chart_type,
+            allow_llm=True,   # người dùng gọi /chart là xin biểu đồ tường minh
         )
     except Exception as exc:
         logger.error("[ChartRouter] /chart error: %s", exc, exc_info=True)
@@ -90,6 +91,9 @@ async def chat_to_chart(request: ChatToChartRequest) -> ChatToChartResponse:
         "user_query": request.query,
         "session_id": request.session_id,
         "retry_count": 0,
+        "data_retry_count": 0,
+        "history": [],
+        "force_chart": True,   # endpoint này luôn muốn biểu đồ
     }
     if request.chart_type:
         initial_state["forced_chart_type"] = request.chart_type

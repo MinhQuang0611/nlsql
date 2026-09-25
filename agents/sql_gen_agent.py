@@ -1,163 +1,108 @@
 from __future__ import annotations
 
 import logging
-from pydantic import BaseModel, Field
 
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_openai import OpenAIEmbeddings
+from pydantic import BaseModel, Field
 from qdrant_client import QdrantClient
 
 from config import get_settings
-from graph.state import AgentState, TableSchema
+from db.connection import get_domain_engine_type
+from graph.state import AgentState
+from prompts.dialect import get_dialect_label, get_dialect_rules
 from prompts.sql_gen import SQL_GEN_SYSTEM, SQL_GEN_HUMAN, SQL_GEN_RETRY_HINT
 from utils.chat_history import format_history
+from utils.llm import make_llm
+from utils.schema_format import format_schema_context, format_business_context
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-_llm = ChatOpenAI(
-    model=settings.sql_gen_model,
-    temperature=settings.llm_temperature,
-    api_key=settings.openai_api_key,
-)
+_llm = make_llm(model=settings.sql_gen_model)
+
 
 class SQLGenerationSchema(BaseModel):
-    sql: str = Field(description="Câu lệnh PostgreSQL query thuần túy")
-    reasoning: str = Field(description="Giải thích ngắn gọn lý do sinh ra câu lệnh SQL này")
+    # `plan` đứng TRƯỚC `sql`: với structured output, thứ tự field chính là thứ tự
+    # model sinh token, nên kế hoạch được viết ra trước và SQL bám theo nó.
+    # Đây là phần việc của sql_plan_agent cũ, gộp vào đây để bớt một lượt LLM.
+    plan: str = Field(description="Kế hoạch suy luận theo 6 bước: bảng, cột, lọc, JOIN, tổng hợp, sắp xếp.")
+    sql: str = Field(description="Câu lệnh SQL thuần tuý, đúng dialect, chỉ SELECT.")
 
 
-def _format_schema_context(schemas: list[TableSchema]) -> str:
-    """Render schema_context list into a readable string for the prompt."""
-    parts = []
-    for s in schemas:
-        col_lines_arr = []
-        for c in s["columns"]:
-            c_name = f'"{c["name"]}"'
-            c_type = c["type"].upper()
-            null_str = " NULL" if c.get("nullable") else " NOT NULL"
-            
-            extra = []
-            if c.get("comment"): extra.append(f"DB Comment: {c['comment']}")
-            if c.get("excel_vi_name"): extra.append(f"Tên TV: {c['excel_vi_name']}")
-            if c.get("excel_note"): extra.append(f"Ghi chú: {c['excel_note']}")
-            
-            extra_str = f"  -- {', '.join(extra)}" if extra else ""
-            col_lines_arr.append(f"    - {c_name} {c_type}{null_str}{extra_str}")
-        
-        col_lines = "\n".join(col_lines_arr)
-            
-        sample = ""
-        if s.get("sample_rows"):
-            sample = f"\n  Sample: {s['sample_rows'][0]}"
-            
-        fks_str = ""
-        if s.get("foreign_keys"):
-            fks = []
-            for fk in s["foreign_keys"]:
-                fks.append(f"    - {fk['column_name']} REFERENCES {fk['foreign_table']}({fk['foreign_column']})")
-            if fks:
-                fks_str = "\n  Foreign Keys:\n" + "\n".join(fks)
-                
-        desc_parts = []
-        if s.get("description"): desc_parts.append(f"DB Desc: {s['description']}")
-        if s.get("excel_table_desc"): desc_parts.append(f"Tên TV: {s['excel_table_desc']}")
-        if s["table_name"] in settings.TABLE_RULES:
-            desc_parts.append(f"Quy tắc (BAT BUOC): {settings.TABLE_RULES[s['table_name']]}")
-            
-        desc = ""
-        if desc_parts:
-            desc = f"\n  Description: ({' | '.join(desc_parts)})"
-            
-        parts.append(f'Table: "{s["table_name"]}"{desc}\n{col_lines}{fks_str}{sample}')
-    return "\n\n".join(parts)
+def _fetch_few_shot(domain: str, user_query: str) -> str:
+    """Lấy tối đa 3 ví dụ (câu hỏi → SQL) gần nghĩa nhất từ collection theo domain."""
+    if not settings.qdrant_url:
+        return "Không có ví dụ."
+    collection = f"few_shot_collection_{domain}"
+    try:
+        qdrant = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
+        embeddings = OpenAIEmbeddings(model=settings.embedding_model, api_key=settings.openai_api_key)
+        response = qdrant.query_points(
+            collection_name=collection,
+            query=embeddings.embed_query(user_query),
+            limit=3,
+        )
+        lines = [
+            f"Q: {hit.payload['question']}\nSQL: {hit.payload['sql']}"
+            for hit in response.points if hit.payload
+        ]
+        logger.info("[SQLGenAgent] %d few-shot từ '%s'.", len(lines), collection)
+        return "\n\n".join(lines) if lines else "Không có ví dụ."
+    except Exception as exc:
+        logger.warning("[SQLGenAgent] few-shot từ '%s' thất bại: %s", collection, exc)
+        return "Không có ví dụ."
 
 
-async def sql_gen_agent(state: AgentState) -> AgentState:
+async def sql_gen_agent(state: AgentState) -> dict:
     """
-    LangGraph node: generate SQL from natural language using the reasoning plan.
-    Reads  : user_query, schema_context, query_plan
-    Writes : generated_sql, sql_reasoning, (clears sql_correction logic)
+    Đọc : user_query, schema_context, business_context, history, retry hints
+    Ghi  : generated_sql, sql_reasoning, sql_correction (reset), final_sql (reset)
     """
     user_query = state.get("user_query", "")
-    schema_context = state.get("schema_context", [])
-    query_plan = state.get("query_plan", "")
+    domain = state.get("domain", "qldt")
+    engine_type = get_domain_engine_type(domain)
     retry_count = state.get("retry_count", 0)
-    history = state.get("history", [])
-    
-    schema_str = _format_schema_context(schema_context)
+    data_retry_count = state.get("data_retry_count", 0)
 
-    history_text = format_history(history)
-
-    retry_hint = ""
+    # Gợi ý sửa lỗi gộp từ hai nguồn: sql_check (EXPLAIN lỗi) và data_check (kết quả bất thường).
+    issues: list[str] = []
     if retry_count > 0:
-        prev_check = state.get("sql_correction", {})
-        issues = prev_check.get("issues", [])
-        retry_hint = SQL_GEN_RETRY_HINT.format(
-            issues="\n".join(f"  - {i}" for i in issues)
-        )
+        issues.extend(state.get("sql_correction", {}).get("issues", []))
+    if data_retry_count > 0:
+        issues.extend(state.get("data_check_issues", []))
+    retry_hint = SQL_GEN_RETRY_HINT.format(issues="\n".join(f"  - {i}" for i in issues)) if issues else ""
 
-    logger.info("[SQLGenAgent] attempt=%d query=%r, history_len=%d", retry_count + 1, user_query, len(history))
-
-    # 1. Fetch Few-Shot Examples from Qdrant
-    few_shot_str = "Không tìm thấy ví dụ (No few shot available)."
-    if settings.qdrant_url and settings.qdrant_api_key:
-        try:
-            qdrant = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
-            embeddings = OpenAIEmbeddings(
-                model=settings.embedding_model, 
-                api_key=settings.openai_api_key
-            )
-            
-            vector = embeddings.embed_query(user_query)
-            response = qdrant.query_points(
-                collection_name="few_shot_collection",
-                query=vector,
-                limit=3
-            )
-            search_result = response.points
-            if search_result:
-                lines = []
-                for hit in search_result:
-                    if hit.payload:
-                        lines.append(f"Q: {hit.payload['question']}\nSQL: {hit.payload['sql']}")
-                if lines:
-                    few_shot_str = "\n\n".join(lines)
-                logger.info(f"[SQLGenAgent] Retrieved {len(lines)} few-shot examples.")
-        except Exception as exc:
-            logger.warning(f"[SQLGenAgent] Qdrant few-shot retrieval failed or skipped: {exc}")
+    logger.info("[SQLGenAgent] attempt=%d (data_retry=%d) query=%r",
+                retry_count + 1, data_retry_count, user_query)
 
     messages = [
-        SystemMessage(content=SQL_GEN_SYSTEM),
+        SystemMessage(content=SQL_GEN_SYSTEM.format(
+            dialect_name=get_dialect_label(engine_type),
+            dialect_rules=get_dialect_rules(engine_type),
+        )),
         HumanMessage(content=SQL_GEN_HUMAN.format(
             user_query=user_query,
-            query_plan=query_plan,
-            schema_context=schema_str,
-            few_shot_examples=few_shot_str,
+            schema_context=format_schema_context(state.get("schema_context", [])),
+            business_context=format_business_context(state.get("business_context", [])),
+            few_shot_examples=_fetch_few_shot(domain, user_query),
             retry_hint=retry_hint,
-            history_text=history_text,
+            history_text=format_history(state.get("history", [])),
         )),
     ]
 
-    llm_structured = _llm.with_structured_output(SQLGenerationSchema)
-    
-    generated_sql = ""
-    sql_reasoning = ""
-
+    generated_sql, plan = "", ""
     try:
-        response = await llm_structured.ainvoke(messages)
+        response = await _llm.with_structured_output(SQLGenerationSchema).ainvoke(messages)
         generated_sql = response.sql.strip()
-        sql_reasoning = response.reasoning
+        plan = response.plan
     except Exception as exc:
-        logger.error("[SQLGenAgent] SQL generation failed: %s", exc, exc_info=True)
+        logger.error("[SQLGenAgent] sinh SQL thất bại: %s", exc, exc_info=True)
 
-    logger.info("[SQLGenAgent] generated_sql=\n%s", generated_sql)
-    
-    # Return fresh state for correction logic down the line
+    logger.info("[SQLGenAgent] plan=\n%s\nsql=\n%s", plan, generated_sql)
     return {
-        **state, 
-        "generated_sql": generated_sql, 
-        "sql_reasoning": sql_reasoning,
-        # Clear out any past corrections as this is a fresh generation
+        "generated_sql": generated_sql,
+        "sql_reasoning": plan,
         "sql_correction": {"is_valid": False, "issues": [], "fixed_sql": None},
-        "final_sql": ""
+        "final_sql": "",
     }

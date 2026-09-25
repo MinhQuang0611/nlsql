@@ -4,7 +4,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agents.schema_agent import _fetch_all_tables, _fetch_table_schema
+from db.introspect import fetch_all_tables as _fetch_all_tables, fetch_table_schema as _fetch_table_schema
 
 async def main():
     try:

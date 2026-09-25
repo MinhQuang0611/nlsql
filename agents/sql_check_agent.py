@@ -1,133 +1,69 @@
+"""
+Kiểm tra tĩnh câu SQL trước khi chạy: chốt chặn lệnh ghi + EXPLAIN dry-run.
+
+Trước đây node này còn gọi LLM để "sửa" SQL khi EXPLAIN lỗi — một cơ chế sửa lỗi
+thứ hai chồng lên vòng retry sql_gen đã có, với ba vấn đề: prompt ghi cứng
+PostgreSQL trong khi domain chạy ClickHouse; SQL "đã sửa" được đưa thẳng sang
+execute mà không EXPLAIN lại; và khi LLM tự khai chưa sửa được thì bản sửa bị
+vứt đi để sql_gen sinh lại từ đầu. Nay node này KHÔNG gọi LLM: EXPLAIN lỗi thì
+trả nguyên thông báo lỗi của DB về sql_gen — đó là gợi ý sửa tốt nhất.
+"""
 from __future__ import annotations
 
-import json
 import logging
 import re
-from pydantic import BaseModel, Field
 
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, SystemMessage
 from sqlalchemy import text
 
-from config import get_settings
-
-from graph.state import AgentState, SQLCorrectionResult, TableSchema
-from prompts.sql_check import SQL_CORRECTION_SYSTEM, SQL_CORRECTION_HUMAN
+from db.connection import ch_execute, get_db_context, get_domain_engine_type
+from graph.state import AgentState, SQLCorrectionResult
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
-
-_llm = ChatOpenAI(
-    model=settings.openai_model,
-    temperature=settings.llm_temperature,
-    api_key=settings.openai_api_key,
-)
 
 _DANGEROUS_PATTERN = re.compile(
     r"\b(INSERT|UPDATE|DELETE|DROP|TRUNCATE|ALTER|CREATE|GRANT|REVOKE|EXECUTE|EXEC)\b",
     re.IGNORECASE,
 )
 
-class SQLCorrectionSchema(BaseModel):
-    is_valid: bool = Field(description="Đánh dấu True nếu bạn tin rằng câu lệnh đã được sửa thành công.")
-    issues: list[str] = Field(description="Mô tả các vấn đề bạn đã tìm thấy và cách bạn sửa chúng.")
-    fixed_sql: str = Field(description="Câu lệnh SQL đã được sửa để chạy tốt trên cơ sở dữ liệu.")
 
-def _hard_safety_check(sql: str) -> SQLCorrectionResult | None:
-    match = _DANGEROUS_PATTERN.search(sql)
-    if match:
-        return SQLCorrectionResult(
-            is_valid=False,
-            issues=[f"Dangerous operation detected: {match.group(0).upper()}"],
-            fixed_sql=None,
-        )
-    return None
+def _invalid(*issues: str) -> SQLCorrectionResult:
+    return SQLCorrectionResult(is_valid=False, issues=list(issues), fixed_sql=None)
 
-def _format_schema_summary(schemas: list[TableSchema]) -> str:
-    parts = []
-    for s in schemas:
-        col_names = ", ".join(c["name"] for c in s["columns"])
-        rule = f" (Quy tắc: {settings.TABLE_RULES[s['table_name']]})" if s["table_name"] in settings.TABLE_RULES else ""
-        parts.append(f"Table {s['table_name']}{rule}({col_names})")
-    return "\n".join(parts)
 
-async def sql_check_agent(state: AgentState) -> AgentState:
+async def sql_check_agent(state: AgentState) -> dict:
     """
-    LangGraph node: validate via EXPLAIN, if fail -> call LLM for correction.
+    Đọc : generated_sql, domain
+    Ghi  : sql_correction, final_sql
     """
-    generated_sql = state.get("generated_sql", "")
-    schema_context = state.get("schema_context", [])
-    schema_summary = _format_schema_summary(schema_context)
-
-    logger.info("[SQLCheckAgent] validating SQL via EXPLAIN dry-run...")
-
-    hard_result = _hard_safety_check(generated_sql)
-    if hard_result:
-        logger.warning("[SQLCheckAgent] BLOCKED by safety gate: %s", hard_result["issues"])
-        return {**state, "sql_correction": hard_result, "final_sql": ""}
-
+    generated_sql = (state.get("generated_sql") or "").strip()
     domain = state.get("domain", "qldt")
+    engine_type = get_domain_engine_type(domain)
+
+    if not generated_sql:
+        return {"sql_correction": _invalid("Không sinh được câu SQL nào."), "final_sql": ""}
+
+    match = _DANGEROUS_PATTERN.search(generated_sql)
+    if match:
+        issue = f"Câu SQL chứa lệnh không được phép: {match.group(0).upper()}. Chỉ được dùng SELECT."
+        logger.warning("[SQLCheckAgent] BLOCKED: %s", issue)
+        return {"sql_correction": _invalid(issue), "final_sql": ""}
 
     try:
-        if settings.active_db == "clickhouse":
-            from db.connection import ch_execute
+        if engine_type == "clickhouse":
             await ch_execute(domain, f"EXPLAIN {generated_sql}")
         else:
-            from db.connection import get_db_context
             async with get_db_context(domain) as db:
                 await db.execute(text(f"EXPLAIN {generated_sql}"))
-            
-        logger.info("[SQLCheckAgent] PASS (EXPLAIN OK). No LLM correction needed.")
-        success_result = SQLCorrectionResult(
-            is_valid=True,
-            issues=[],
-            fixed_sql=generated_sql
-        )
-        return {**state, "sql_correction": success_result, "final_sql": generated_sql}
-        
     except Exception as db_exc:
-        db_error_msg = str(db_exc)
-        logger.warning("[SQLCheckAgent] FAIL at EXPLAIN: %s. Initiating LLM Correction...", db_error_msg)
-        
-        # 2. If fail, pass the error to LLM for Correction
-        messages = [
-            SystemMessage(content=SQL_CORRECTION_SYSTEM),
-            HumanMessage(content=SQL_CORRECTION_HUMAN.format(
-                user_query=state.get("user_query", ""),
-                schema_context=schema_summary,
-                invalid_sql=generated_sql,
-                error_message=db_error_msg
-            )),
-        ]
+        error_msg = str(db_exc).split("\n")[0][:500]
+        logger.warning("[SQLCheckAgent] EXPLAIN FAIL (%s): %s", engine_type, error_msg)
+        return {
+            "sql_correction": _invalid(f"{engine_type} báo lỗi khi EXPLAIN: {error_msg}"),
+            "final_sql": "",
+        }
 
-        llm_structured = _llm.with_structured_output(SQLCorrectionSchema)
-        correction_result = SQLCorrectionResult(
-            is_valid=False,
-            issues=[f"Postgres Error: {db_error_msg}"],
-            fixed_sql=None
-        )
-        final_sql = ""
-
-        try:
-            response = await llm_structured.ainvoke(messages)
-            correction_result = SQLCorrectionResult(
-                is_valid=response.is_valid,
-                issues=response.issues,
-                fixed_sql=response.fixed_sql
-            )
-            final_sql = response.fixed_sql or ""
-            logger.info("[SQLCheckAgent] LLM returned correction. issues=%s", response.issues)
-            
-            # Optionally we could EXPLAIN the fixed_sql again, but we will let builder loop handle it
-            # if we wanted a multi-step loop. For now we will return it.
-            if final_sql:
-                # Let's do a quick safety check on the fixed SQL too
-                hard_result2 = _hard_safety_check(final_sql)
-                if hard_result2:
-                    return {**state, "sql_correction": hard_result2, "final_sql": ""}
-                
-        except Exception as exc:
-            logger.error("[SQLCheckAgent] LLM Correction failed: %s", exc)
-            correction_result["issues"].append(f"LLM Validator error: {exc}")
-
-        return {**state, "sql_correction": correction_result, "final_sql": final_sql}
+    logger.info("[SQLCheckAgent] EXPLAIN OK (%s).", engine_type)
+    return {
+        "sql_correction": SQLCorrectionResult(is_valid=True, issues=[], fixed_sql=generated_sql),
+        "final_sql": generated_sql,
+    }

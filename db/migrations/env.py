@@ -15,6 +15,7 @@ from config import get_settings
 from db.connection import Base
 from api.models.business_rule import BusinessRule
 from api.models.faq import FAQ
+from api.models.app_user import AppUser
 
 settings = get_settings()
 
@@ -28,6 +29,19 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
+# Bảng alembic KHÔNG quản lý: lịch sử chat (create_all trong init_internal_db) và bảng của
+# LangGraph checkpointer. Thiếu bộ lọc này, autogenerate sinh lệnh DROP chúng
+# (lỗi đã xảy ra ở revision fc74da33ac26).
+EXCLUDED_TABLES = {
+    "conversations", "messages",
+    "checkpoints", "checkpoint_blobs", "checkpoint_writes", "checkpoint_migrations",
+}
+
+
+def include_object(obj, name, type_, reflected, compare_to):
+    table = name if type_ == "table" else getattr(getattr(obj, "table", None), "name", None)
+    return table not in EXCLUDED_TABLES
+
 def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
@@ -35,6 +49,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        include_object=include_object,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -47,7 +62,7 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(connection=connection, target_metadata=target_metadata, include_object=include_object)
         with context.begin_transaction():
             context.run_migrations()
 
